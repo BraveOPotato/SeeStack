@@ -247,3 +247,36 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+/* ── Search bar ── */
+.search-wrap {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 4px 8px;
+  margin: 0 6px; transition: border-color 0.15s;
+  min-width: 200px; max-width: 260px;
+}
+.search-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+.search-icon { color: var(--text-dimmer); flex-shrink: 0; }
+.search-input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text); font-family: var(--font-mono); font-size: 11.5px;
+  min-width: 0;
+}
+.search-input::placeholder { color: var(--text-dimmer); }
+.search-count { font-family: var(--font-mono); font-size: 10px; color: var(--text-dimmer); white-space: nowrap; flex-shrink: 0; }
+.search-clear {
+  background: none; border: none; color: var(--text-dimmer); cursor: pointer;
+  font-size: 11px; padding: 0 2px; line-height: 1; transition: color 0.15s;
+  opacity: 0; pointer-events: none;
+}
+.search-clear:hover { color: var(--text); }
+
+/* ── Selection box (now a div overlay in screen space) ── */
+#selection-box-div {
+  position: absolute; pointer-events: none; z-index: 10;
+  border: 1px solid var(--accent); background: rgba(77,232,178,0.06);
+  border-radius: 2px;
+  /* dashed via outline trick */
+  box-shadow: 0 0 0 1px rgba(77,232,178,0.3);
+}
