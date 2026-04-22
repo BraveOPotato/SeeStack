@@ -1,71 +1,62 @@
 /* ===== CallFlow App ===== */
 'use strict';
 
-// ─── State ──────────────────────────────────────────────────────────────────
 const state = {
-  nodes: [],        // { id, type:'fn'|'cond', x, y, name, params, returnType, returnExample, branches, color, notes }
-  edges: [],        // { id, from, to, type:'call'|'return'|'param'|'cond', dtype, example, label, color }
+  nodes: [],
+  edges: [],
   selectedNodes: new Set(),
   selectedEdge: null,
-  tool: 'select',   // 'select' | 'fn' | 'cond' | 'connect'
+  tool: 'select',
   zoom: 1,
   pan: { x: 0, y: 0 },
   nextId: 1,
 };
 
-// ─── DOM refs ────────────────────────────────────────────────────────────────
-const svg         = document.getElementById('svg-canvas');
-const nodesGroup  = document.getElementById('nodes-group');
-const edgesGroup  = document.getElementById('edges-group');
-const dragEdge    = document.getElementById('drag-edge');
-const canvasWrap  = document.getElementById('canvas-wrap');
-const minimap     = document.getElementById('minimap');
-const mmCtx       = minimap.getContext('2d');
-const statusMsg   = document.getElementById('status-msg');
-const zoomLabel   = document.getElementById('zoom-label');
+const svg        = document.getElementById('svg-canvas');
+const nodesGroup = document.getElementById('nodes-group');
+const edgesGroup = document.getElementById('edges-group');
+const dragEdge   = document.getElementById('drag-edge');
+const canvasWrap = document.getElementById('canvas-wrap');
+const minimap    = document.getElementById('minimap');
+const mmCtx      = minimap.getContext('2d');
+const statusMsg  = document.getElementById('status-msg');
+const zoomLabel  = document.getElementById('zoom-label');
 
-// Modals
-const modalNode     = document.getElementById('modal-node');
-const modalEdge     = document.getElementById('modal-edge');
-const modalConfirm  = document.getElementById('modal-confirm');
-const edgeTooltip   = document.getElementById('edge-tooltip');
+const modalNode    = document.getElementById('modal-node');
+const modalEdge    = document.getElementById('modal-edge');
+const modalConfirm = document.getElementById('modal-confirm');
+const edgeTooltip  = document.getElementById('edge-tooltip');
 
-// ─── Color palettes ──────────────────────────────────────────────────────────
+const infoPanel      = document.getElementById('info-panel');
+const infoPanelBody  = document.getElementById('info-panel-body');
+const infoPanelTitle = document.getElementById('info-panel-title');
+let _infoPanelNodeId = null;
+
 const NODE_COLORS = [
-  { label: 'Navy',     fill: '#1a3a5c', border: '#3a8fff' },
-  { label: 'Purple',   fill: '#2d1f4a', border: '#9b6fff' },
-  { label: 'Green',    fill: '#1a3d2e', border: '#4de8b2' },
-  { label: 'Red',      fill: '#3d1a1a', border: '#ff6b6b' },
-  { label: 'Amber',    fill: '#3d3519', border: '#f7d96f' },
-  { label: 'Teal',     fill: '#1a2d3d', border: '#4dc8e8' },
-  { label: 'Indigo',   fill: '#1f1f3d', border: '#7c6ff7' },
-  { label: 'Forest',   fill: '#1f2e20', border: '#78c96b' },
+  { fill: '#1a3a5c', border: '#3a8fff' },
+  { fill: '#2d1f4a', border: '#9b6fff' },
+  { fill: '#1a3d2e', border: '#4de8b2' },
+  { fill: '#3d1a1a', border: '#ff6b6b' },
+  { fill: '#3d3519', border: '#f7d96f' },
+  { fill: '#1a2d3d', border: '#4dc8e8' },
+  { fill: '#1f1f3d', border: '#7c6ff7' },
+  { fill: '#1f2e20', border: '#78c96b' },
 ];
 const EDGE_COLORS = [
-  { label: 'Teal',   val: '#4de8b2' },
-  { label: 'Orange', val: '#ff8f4d' },
-  { label: 'Purple', val: '#7c6ff7' },
-  { label: 'Yellow', val: '#f7d96f' },
-  { label: 'Pink',   val: '#f76fd9' },
-  { label: 'Red',    val: '#ff5a5a' },
-  { label: 'Blue',   val: '#4dc8e8' },
-  { label: 'Green',  val: '#78c96b' },
+  '#4de8b2','#ff8f4d','#7c6ff7','#f7d96f','#f76fd9','#ff5a5a','#4dc8e8','#78c96b'
 ];
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
 const uid = () => `n${state.nextId++}`;
 
-function svgPt(clientX, clientY) {
-  const rect = svg.getBoundingClientRect();
-  return {
-    x: (clientX - rect.left - state.pan.x) / state.zoom,
-    y: (clientY - rect.top  - state.pan.y) / state.zoom,
-  };
+function svgPt(cx, cy) {
+  const r = svg.getBoundingClientRect();
+  return { x: (cx - r.left - state.pan.x) / state.zoom, y: (cy - r.top - state.pan.y) / state.zoom };
 }
 
 function applyTransform() {
-  nodesGroup.setAttribute('transform', `translate(${state.pan.x},${state.pan.y}) scale(${state.zoom})`);
-  edgesGroup.setAttribute('transform', `translate(${state.pan.x},${state.pan.y}) scale(${state.zoom})`);
+  const t = `translate(${state.pan.x},${state.pan.y}) scale(${state.zoom})`;
+  nodesGroup.setAttribute('transform', t);
+  edgesGroup.setAttribute('transform', t);
   zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
   drawMinimap();
 }
@@ -79,265 +70,219 @@ function showStatus(msg, ms = 2000) {
 
 function setTool(tool) {
   state.tool = tool;
-  document.querySelectorAll('.tool-btn[id^="btn-"]').forEach(b => b.classList.remove('active'));
-  const map = { select: 'btn-select', fn: 'btn-add-fn', cond: 'btn-add-cond', connect: 'btn-connect' };
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  const map = { select:'btn-select', fn:'btn-add-fn', cond:'btn-add-cond', connect:'btn-connect' };
   if (map[tool]) document.getElementById(map[tool])?.classList.add('active');
-  canvasWrap.className = '';
-  if (tool === 'connect') canvasWrap.classList.add('tool-connect');
+  canvasWrap.className = tool === 'connect' ? 'tool-connect' : '';
 }
 
-// ─── Node geometry ────────────────────────────────────────────────────────────
-const FN_R   = 44;   // function node radius
-const COND_H = 44;   // half-size of diamond
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-function nodeCenter(node) { return { x: node.x, y: node.y }; }
+/* ── Node radius / auto-scaling ── */
+const FN_R_BASE = 44;
+
+function nodeRadius(node) {
+  if (node.sizeOverride != null) return node.sizeOverride;
+  return computeAutoRadius(node, new Set());
+}
+
+function computeAutoRadius(node, visited) {
+  if (visited.has(node.id)) return FN_R_BASE;
+  visited.add(node.id);
+  const parentFnNodes = state.edges
+    .filter(e => e.to === node.id && (e.type === 'call' || e.type === 'cond' || e.type === 'param'))
+    .map(e => state.nodes.find(n => n.id === e.from && n.type === 'fn'))
+    .filter(n => n && n.id !== node.id);
+  if (!parentFnNodes.length) return FN_R_BASE;
+  const parentR = Math.max(...parentFnNodes.map(n =>
+    n.sizeOverride != null ? n.sizeOverride : computeAutoRadius(n, new Set(visited))
+  ));
+  return Math.max(16, parentR * 0.75);
+}
 
 function nodeBorderPoint(node, tx, ty) {
   const dx = tx - node.x, dy = ty - node.y;
   const len = Math.sqrt(dx*dx + dy*dy) || 1;
-  if (node.type === 'fn') {
-    const r = FN_R + 2;
-    return { x: node.x + dx/len*r, y: node.y + dy/len*r };
-  } else {
-    // diamond: find intersection with rhombus
-    const h = COND_H + 2;
-    const t1 = h / (Math.abs(dx) + Math.abs(dy) || 1);
-    return { x: node.x + dx*t1, y: node.y + dy*t1 };
-  }
+  const r = nodeRadius(node) + 2;
+  if (node.type === 'fn') return { x: node.x + dx/len*r, y: node.y + dy/len*r };
+  const t = r / (Math.abs(dx) + Math.abs(dy) || 1);
+  return { x: node.x + dx*t, y: node.y + dy*t };
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────────
-
-function render() {
-  renderEdges();
-  renderNodes();
-  drawMinimap();
+/* ── SVG helpers ── */
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k,v] of Object.entries(attrs)) if (v !== undefined && v !== null) el.setAttribute(k, v);
+  return el;
 }
+function svgTxt(text, attrs) {
+  const el = svgEl('text', attrs);
+  el.textContent = text;
+  return el;
+}
+function trunc(s, n) { return s && s.length > n ? s.slice(0, n-1)+'…' : (s||''); }
+
+/* ── Render ── */
+function render() { renderEdges(); renderNodes(); drawMinimap(); }
 
 function getNodeColor(node) {
   if (node.color) {
-    const preset = NODE_COLORS.find(c => c.fill === node.color);
-    return preset || { fill: node.color, border: '#888' };
+    const p = NODE_COLORS.find(c => c.fill === node.color);
+    return p || { fill: node.color, border: lighten(node.color) };
   }
-  return node.type === 'fn'
-    ? { fill: '#1a3a5c', border: '#3a8fff' }
-    : { fill: '#2d1f4a', border: '#9b6fff' };
+  return node.type === 'fn' ? NODE_COLORS[0] : NODE_COLORS[1];
+}
+
+function lighten(hex) {
+  try {
+    const n = parseInt(hex.slice(1),16);
+    const r = Math.min(255,((n>>16)&0xff)+60), g = Math.min(255,((n>>8)&0xff)+60), b = Math.min(255,(n&0xff)+60);
+    return `#${((r<<16)|(g<<8)|b).toString(16).padStart(6,'0')}`;
+  } catch { return '#888'; }
 }
 
 function renderNodes() {
-  // Remove stale
-  const existingIds = new Set(nodesGroup.querySelectorAll('[data-node-id]') ? [...nodesGroup.querySelectorAll('[data-node-id]')].map(e => e.dataset.nodeId) : []);
-  const currentIds  = new Set(state.nodes.map(n => n.id));
-  existingIds.forEach(id => { if (!currentIds.has(id)) nodesGroup.querySelector(`[data-node-id="${id}"]`)?.remove(); });
+  const existing = new Set([...nodesGroup.querySelectorAll('[data-nid]')].map(e => e.dataset.nid));
+  const current  = new Set(state.nodes.map(n => n.id));
+  existing.forEach(id => { if (!current.has(id)) nodesGroup.querySelector(`[data-nid="${id}"]`)?.remove(); });
 
   state.nodes.forEach(node => {
-    let g = nodesGroup.querySelector(`[data-node-id="${node.id}"]`);
-    const isNew = !g;
-    if (isNew) {
-      g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      g.setAttribute('data-node-id', node.id);
-      g.classList.add('node');
+    let g = nodesGroup.querySelector(`[data-nid="${node.id}"]`);
+    if (!g) {
+      g = svgEl('g', { 'data-nid': node.id, class: 'node' });
       nodesGroup.appendChild(g);
       attachNodeEvents(g, node);
     }
-
     g.innerHTML = '';
     const col = getNodeColor(node);
-    const sel  = state.selectedNodes.has(node.id);
-
-    if (node.type === 'fn') {
-      renderFnNode(g, node, col, sel);
-    } else {
-      renderCondNode(g, node, col, sel);
-    }
-
-    // port indicators
-    renderPorts(g, node);
-
-    if (sel) g.classList.add('selected'); else g.classList.remove('selected');
+    const sel = state.selectedNodes.has(node.id);
+    if (node.type === 'fn') drawFnNode(g, node, col, sel);
+    else drawCondNode(g, node, col, sel);
+    drawPorts(g, node);
+    sel ? g.classList.add('selected') : g.classList.remove('selected');
   });
 }
 
-function svgEl(tag, attrs) {
-  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k, v));
-  return el;
-}
-function svgText(t, attrs) {
-  const el = svgEl('text', attrs);
-  el.textContent = t;
-  return el;
-}
+function drawFnNode(g, node, col, sel) {
+  const R  = nodeRadius(node);
+  const sc = R / FN_R_BASE;
+  const fs = Math.max(8, Math.round(11.5 * sc));
+  const sf = Math.max(6, Math.round(9   * sc));
+  const mc = Math.max(5, Math.round(14  * sc));
 
-function truncate(str, max) {
-  if (!str) return '';
-  return str.length > max ? str.slice(0, max-1)+'…' : str;
-}
+  g.appendChild(svgEl('circle', { cx:node.x, cy:node.y, r:R+2, fill:'rgba(0,0,0,0.28)' }));
+  const body = svgEl('circle', { cx:node.x, cy:node.y, r:R, fill:col.fill, stroke:col.border, 'stroke-width': sel?2.5:1.5, class:'node-body node-border' });
+  if (sel) body.setAttribute('filter','url(#glow)');
+  g.appendChild(body);
+  g.appendChild(svgEl('circle', { cx:node.x, cy:node.y, r:Math.max(4,R-6), fill:'none', stroke:col.border, 'stroke-width':0.5, opacity:0.3 }));
 
-function renderFnNode(g, node, col, sel) {
-  // Shadow circle
-  g.appendChild(svgEl('circle', { cx: node.x, cy: node.y, r: FN_R+2, fill: 'rgba(0,0,0,0.3)', 'class': 'node-shadow' }));
-  // Body
-  const c = svgEl('circle', { cx: node.x, cy: node.y, r: FN_R, fill: col.fill, stroke: col.border, 'stroke-width': sel?2.5:1.5, 'class': 'node-body node-border' });
-  if (sel) c.setAttribute('filter', 'url(#glow)');
-  g.appendChild(c);
-
-  // Icon ring
-  g.appendChild(svgEl('circle', { cx: node.x, cy: node.y, r: FN_R-6, fill: 'none', stroke: col.border, 'stroke-width': 0.5, opacity: 0.3 }));
-
-  // fn() symbol
-  const sym = svgEl('text', { x: node.x, y: node.y - 8, 'text-anchor': 'middle', 'dominant-baseline': 'middle', fill: col.border, 'font-family': "'Martian Mono',monospace", 'font-size': '11', opacity: 0.7 });
-  sym.textContent = 'fn()';
+  const sym = svgTxt('fn()', { x:node.x, y:node.y - R*0.18, 'text-anchor':'middle', 'dominant-baseline':'middle', fill:col.border, 'font-family':"'Martian Mono',monospace", 'font-size':Math.max(7,fs-1), opacity:0.7 });
   g.appendChild(sym);
+  g.appendChild(svgTxt(trunc(node.name||'function', mc), { x:node.x, y:node.y+R*0.16, 'text-anchor':'middle', 'dominant-baseline':'middle', class:'node-label', 'font-size':fs }));
 
-  // Name
-  g.appendChild(svgText(truncate(node.name || 'function', 14), { x: node.x, y: node.y+7, 'class': 'node-label', fill: 'var(--text)' }));
-
-  // Return badge
   if (node.returnType) {
-    const badge = svgEl('g', {});
-    const bx = node.x, by = node.y + FN_R + 12;
-    badge.appendChild(svgEl('rect', { x: bx-24, y: by-8, width: 48, height: 16, rx: 8, fill: 'rgba(255,143,77,0.2)', stroke: 'var(--edge-return)', 'stroke-width': 0.8 }));
-    badge.appendChild(svgText(truncate(node.returnType, 8), { x: bx, y: by+1, 'class': 'node-sublabel', fill: 'var(--edge-return)' }));
-    g.appendChild(badge);
+    const bw = Math.max(36, Math.round(48*sc));
+    const by = node.y + R + 13;
+    g.appendChild(svgEl('rect', { x:node.x-bw/2, y:by-8, width:bw, height:16, rx:8, fill:'rgba(255,143,77,0.2)', stroke:'var(--edge-return)', 'stroke-width':0.8 }));
+    g.appendChild(svgTxt(trunc(node.returnType, Math.max(4,Math.round(8*sc))), { x:node.x, y:by+1, 'text-anchor':'middle', 'dominant-baseline':'middle', class:'node-sublabel', fill:'var(--edge-return)', 'font-size':sf }));
   }
-
-  // Param count badge
   if (node.params && node.params.length > 0) {
-    const bx = node.x - FN_R - 2, by = node.y - FN_R + 2;
-    g.appendChild(svgEl('circle', { cx: bx, cy: by, r: 9, fill: 'rgba(124,111,247,0.25)', stroke: 'var(--edge-param)', 'stroke-width': 0.8 }));
-    g.appendChild(svgText(node.params.length, { x: bx, y: by+1, 'class': 'node-sublabel', fill: 'var(--edge-param)', 'font-size': 9 }));
+    const bx = node.x - R - 2, by = node.y - R + 2;
+    g.appendChild(svgEl('circle', { cx:bx, cy:by, r:9, fill:'rgba(124,111,247,0.25)', stroke:'var(--edge-param)', 'stroke-width':0.8 }));
+    g.appendChild(svgTxt(node.params.length, { x:bx, y:by+1, 'text-anchor':'middle', 'dominant-baseline':'middle', class:'node-sublabel', fill:'var(--edge-param)', 'font-size':9 }));
   }
 }
 
-function renderCondNode(g, node, col, sel) {
-  const h = COND_H;
+function drawCondNode(g, node, col, sel) {
+  const h  = nodeRadius(node);
+  const sc = h / FN_R_BASE;
+  const fs = Math.max(8, Math.round(11.5 * sc));
+  const mc = Math.max(4, Math.round(12   * sc));
   const pts = `${node.x},${node.y-h} ${node.x+h},${node.y} ${node.x},${node.y+h} ${node.x-h},${node.y}`;
 
-  // Shadow
-  g.appendChild(svgEl('polygon', { points: pts, fill: 'rgba(0,0,0,0.35)', transform: 'translate(2,3)' }));
-  // Body
-  const poly = svgEl('polygon', { points: pts, fill: col.fill, stroke: col.border, 'stroke-width': sel?2.5:1.5, 'class': 'node-body node-border' });
-  if (sel) poly.setAttribute('filter', 'url(#glow)');
-  g.appendChild(poly);
+  g.appendChild(svgEl('polygon', { points:pts, fill:'rgba(0,0,0,0.3)', transform:'translate(2,3)' }));
+  const body = svgEl('polygon', { points:pts, fill:col.fill, stroke:col.border, 'stroke-width':sel?2.5:1.5, class:'node-body node-border' });
+  if (sel) body.setAttribute('filter','url(#glow)');
+  g.appendChild(body);
 
-  // if symbol
-  g.appendChild(svgText('if', { x: node.x, y: node.y - 10, 'text-anchor': 'middle', 'dominant-baseline': 'middle', fill: col.border, 'font-family': "'Martian Mono',monospace", 'font-size': '11', opacity: 0.7 }));
+  g.appendChild(svgTxt('if', { x:node.x, y:node.y-h*0.22, 'text-anchor':'middle', 'dominant-baseline':'middle', fill:col.border, 'font-family':"'Martian Mono',monospace", 'font-size':Math.max(7,fs-1), opacity:0.7 }));
+  g.appendChild(svgTxt(trunc(node.name||'condition', mc), { x:node.x, y:node.y+h*0.14, 'text-anchor':'middle', 'dominant-baseline':'middle', class:'node-label', 'font-size':fs }));
 
-  // Name
-  g.appendChild(svgText(truncate(node.name || 'condition', 12), { x: node.x, y: node.y+6, 'class': 'node-label', fill: 'var(--text)' }));
-
-  // Branch count
   if (node.branches && node.branches.length > 0) {
-    const bx = node.x + h + 2, by = node.y - h + 2;
-    g.appendChild(svgEl('circle', { cx: bx, cy: by, r: 9, fill: 'rgba(247,217,111,0.25)', stroke: 'var(--edge-cond)', 'stroke-width': 0.8 }));
-    g.appendChild(svgText(node.branches.length, { x: bx, y: by+1, 'class': 'node-sublabel', fill: 'var(--edge-cond)', 'font-size': 9 }));
+    const bx = node.x+h+2, by = node.y-h+2;
+    g.appendChild(svgEl('circle', { cx:bx, cy:by, r:9, fill:'rgba(247,217,111,0.25)', stroke:'var(--edge-cond)', 'stroke-width':0.8 }));
+    g.appendChild(svgTxt(node.branches.length, { x:bx, y:by+1, 'text-anchor':'middle', 'dominant-baseline':'middle', class:'node-sublabel', fill:'var(--edge-cond)', 'font-size':9 }));
   }
 }
 
-function renderPorts(g, node) {
-  const r = node.type === 'fn' ? FN_R : COND_H;
-  const ports = [
-    { id: 'top',    dx:  0, dy: -1, role: 'io' },
-    { id: 'bottom', dx:  0, dy:  1, role: 'io' },
-    { id: 'left',   dx: -1, dy:  0, role: 'in' },
-    { id: 'right',  dx:  1, dy:  0, role: 'out' },
-  ];
-  ports.forEach(p => {
-    const px = node.x + p.dx * (r + 2);
-    const py = node.y + p.dy * (r + 2);
-    const pt = svgEl('circle', { cx: px, cy: py, r: 4, 'class': `port port-${p.role}`, 'data-port': p.id, 'data-node-id': node.id });
+function drawPorts(g, node) {
+  const r = nodeRadius(node);
+  [{ dx:0,dy:-1,role:'io' },{ dx:0,dy:1,role:'io' },{ dx:-1,dy:0,role:'in' },{ dx:1,dy:0,role:'out' }].forEach(p => {
+    const px = node.x + p.dx*(r+2), py = node.y + p.dy*(r+2);
+    const pt = svgEl('circle', { cx:px, cy:py, r:4, class:`port port-${p.role}`, 'data-nid':node.id });
     g.appendChild(pt);
-    pt.addEventListener('mousedown', e => { e.stopPropagation(); startEdgeDrag(e, node, px, py); });
+    pt.addEventListener('mousedown', e => { e.stopPropagation(); startEdgeDrag(node, px, py); });
   });
 }
 
-// ─── Edge rendering ───────────────────────────────────────────────────────────
-
-function getEdgeColor(edge) {
+/* ── Edge rendering ── */
+function edgeStroke(edge) {
   if (edge.color) return edge.color;
-  return { call: 'var(--edge-default)', return: 'var(--edge-return)', param: 'var(--edge-param)', cond: 'var(--edge-cond)' }[edge.type] || 'var(--edge-default)';
+  return { call:'var(--edge-default)', return:'var(--edge-return)', param:'var(--edge-param)', cond:'var(--edge-cond)' }[edge.type] || 'var(--edge-default)';
 }
 
-function getMarkerId(edge) {
-  if (edge.color) return 'arrow-default';
-  return { call: 'arrow-default', return: 'arrow-return', param: 'arrow-param', cond: 'arrow-cond' }[edge.type] || 'arrow-default';
-}
-
-function cubicPath(x1, y1, x2, y2) {
-  const dx = Math.abs(x2 - x1) * 0.55;
-  const dy = Math.abs(y2 - y1) * 0.55;
-  const cx = Math.max(dx, 40);
-  const cy = Math.max(dy, 40);
+function cubic(x1,y1,x2,y2) {
+  const cx = Math.max(Math.abs(x2-x1)*0.55, 40);
   return `M${x1},${y1} C${x1+cx},${y1} ${x2-cx},${y2} ${x2},${y2}`;
 }
 
 function renderEdges() {
-  const existingIds = new Set([...edgesGroup.querySelectorAll('[data-edge-id]')].map(e => e.dataset.edgeId));
-  const currentIds  = new Set(state.edges.map(e => e.id));
-  existingIds.forEach(id => { if (!currentIds.has(id)) edgesGroup.querySelector(`[data-edge-id="${id}"]`)?.remove(); });
+  const existing = new Set([...edgesGroup.querySelectorAll('[data-eid]')].map(e => e.dataset.eid));
+  const current  = new Set(state.edges.map(e => e.id));
+  existing.forEach(id => { if (!current.has(id)) edgesGroup.querySelector(`[data-eid="${id}"]`)?.remove(); });
 
   state.edges.forEach(edge => {
-    const fromNode = state.nodes.find(n => n.id === edge.from);
-    const toNode   = state.nodes.find(n => n.id === edge.to);
-    if (!fromNode || !toNode) return;
+    const fn = state.nodes.find(n => n.id === edge.from);
+    const tn = state.nodes.find(n => n.id === edge.to);
+    if (!fn || !tn) return;
 
-    let g = edgesGroup.querySelector(`[data-edge-id="${edge.id}"]`);
-    const isNew = !g;
-    if (isNew) {
-      g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      g.setAttribute('data-edge-id', edge.id);
+    let g = edgesGroup.querySelector(`[data-eid="${edge.id}"]`);
+    if (!g) {
+      g = svgEl('g', { 'data-eid': edge.id });
       edgesGroup.appendChild(g);
       attachEdgeEvents(g, edge);
     }
-
     g.innerHTML = '';
 
-    const fp = nodeBorderPoint(fromNode, toNode.x, toNode.y);
-    const tp = nodeBorderPoint(toNode,   fromNode.x, fromNode.y);
-    const d  = cubicPath(fp.x, fp.y, tp.x, tp.y);
-    const col = getEdgeColor(edge);
-    const mId = edge.color ? 'arrow-default' : getMarkerId(edge);
+    const fp = nodeBorderPoint(fn, tn.x, tn.y);
+    const tp = nodeBorderPoint(tn, fn.x, fn.y);
+    const d  = cubic(fp.x, fp.y, tp.x, tp.y);
+    const col = edgeStroke(edge);
 
-    // Invisible hit area
-    const hit = svgEl('path', { d, 'class': 'edge-hit' });
-    g.appendChild(hit);
+    g.appendChild(svgEl('path', { d, class:'edge-hit' }));
 
-    // Visible path
-    const path = svgEl('path', { d, 'class': `edge type-${edge.type}`, stroke: col, 'stroke-dasharray': edge.type==='return'?'7 3':undefined });
-    if (edge.type === 'return') path.setAttribute('stroke-dasharray', '7 3');
-    else path.removeAttribute('stroke-dasharray');
-    path.setAttribute('marker-end', `url(#arrow-default)`);
+    const path = svgEl('path', { d, class:`edge type-${edge.type}`, 'marker-end':'url(#arrow-default)' });
     path.style.stroke = col;
-    if (state.selectedEdge === edge.id) {
-      path.classList.add('selected');
-      path.setAttribute('filter', 'url(#glow)');
-    }
+    if (edge.type === 'return') path.setAttribute('stroke-dasharray','7 3');
+    if (state.selectedEdge === edge.id) { path.classList.add('selected'); path.setAttribute('filter','url(#glow)'); }
     g.appendChild(path);
 
-    // Blips
-    if (fromNode.type === 'fn' && fromNode.params && fromNode.params.length > 0) {
-      renderBlip(g, fp.x + (tp.x - fp.x) * 0.2, fp.y + (tp.y - fp.y) * 0.2, 'var(--edge-param)');
-    }
-    if (fromNode.type === 'fn' && fromNode.returnType) {
-      renderBlip(g, fp.x + (tp.x - fp.x) * 0.8, fp.y + (tp.y - fp.y) * 0.8, 'var(--edge-return)');
-    }
+    if (fn.type === 'fn' && fn.params && fn.params.length > 0)
+      g.appendChild(svgEl('circle', { cx: fp.x+(tp.x-fp.x)*0.2, cy: fp.y+(tp.y-fp.y)*0.2, r:4, fill:'var(--edge-param)', opacity:0.9, 'pointer-events':'none' }));
+    if (fn.type === 'fn' && fn.returnType)
+      g.appendChild(svgEl('circle', { cx: fp.x+(tp.x-fp.x)*0.8, cy: fp.y+(tp.y-fp.y)*0.8, r:4, fill:'var(--edge-return)', opacity:0.9, 'pointer-events':'none' }));
 
-    // Label
     if (edge.label) {
-      const mx = (fp.x + tp.x) / 2, my = (fp.y + tp.y) / 2 - 12;
-      const lw = edge.label.length * 6.5 + 10;
-      g.appendChild(svgEl('rect', { x: mx - lw/2, y: my - 9, width: lw, height: 16, rx: 3, 'class': 'edge-label-bg' }));
-      g.appendChild(svgText(edge.label, { x: mx, y: my+1, 'class': 'edge-label' }));
+      const mx=(fp.x+tp.x)/2, my=(fp.y+tp.y)/2-12, lw=edge.label.length*6.5+10;
+      g.appendChild(svgEl('rect', { x:mx-lw/2, y:my-9, width:lw, height:16, rx:3, class:'edge-label-bg' }));
+      g.appendChild(svgTxt(edge.label, { x:mx, y:my+1, class:'edge-label' }));
     }
   });
 }
 
-function renderBlip(parent, x, y, fill) {
-  parent.appendChild(svgEl('circle', { cx: x, cy: y, r: 4, fill, opacity: 0.9, 'pointer-events': 'none' }));
-}
-
-// ─── Interaction: Node drag ───────────────────────────────────────────────────
+/* ── Node events ── */
 let dragState = null;
 
 function attachNodeEvents(g, node) {
@@ -345,766 +290,610 @@ function attachNodeEvents(g, node) {
     if (state.tool === 'connect') return;
     e.stopPropagation();
     if (e.button !== 0) return;
-
     if (e.shiftKey) {
-      if (state.selectedNodes.has(node.id)) state.selectedNodes.delete(node.id);
-      else state.selectedNodes.add(node.id);
-      renderNodes();
-      return;
+      state.selectedNodes.has(node.id) ? state.selectedNodes.delete(node.id) : state.selectedNodes.add(node.id);
+      renderNodes(); return;
     }
-    if (!state.selectedNodes.has(node.id)) {
-      state.selectedNodes.clear();
-      state.selectedNodes.add(node.id);
-      state.selectedEdge = null;
-    }
-
-    const startPt = svgPt(e.clientX, e.clientY);
-    const starts  = {};
-    state.selectedNodes.forEach(id => {
-      const n = state.nodes.find(nn => nn.id === id);
-      if (n) starts[id] = { x: n.x, y: n.y };
-    });
-
-    dragState = { type: 'node', startPt, starts };
-    renderNodes();
-    renderEdges();
+    if (!state.selectedNodes.has(node.id)) { state.selectedNodes.clear(); state.selectedNodes.add(node.id); state.selectedEdge = null; }
+    const sp = svgPt(e.clientX, e.clientY);
+    const starts = {};
+    state.selectedNodes.forEach(id => { const n = state.nodes.find(nn=>nn.id===id); if(n) starts[id]={x:n.x,y:n.y}; });
+    dragState = { type:'node', sp, starts, moved:false, nodeId:node.id };
+    renderNodes(); renderEdges();
   });
 
-  g.addEventListener('dblclick', e => {
-    e.stopPropagation();
-    openNodeModal(node.id);
+  g.addEventListener('mouseup', e => {
+    if (e.button !== 0) return;
+    if (dragState && dragState.nodeId === node.id && !dragState.moved) showInfoPanel(node.id);
   });
+
+  g.addEventListener('dblclick', e => { e.stopPropagation(); openNodeModal(node.id); });
 
   g.addEventListener('contextmenu', e => {
     e.preventDefault();
     showCtxMenu(e.clientX, e.clientY, [
-      { label: 'Edit', action: () => openNodeModal(node.id) },
-      { label: 'Duplicate', action: () => duplicateNode(node.id) },
-      { sep: true },
-      { label: 'Delete', action: () => confirmDelete(() => deleteNode(node.id)), danger: true },
+      { label:'Edit',      action:()=>openNodeModal(node.id) },
+      { label:'Duplicate', action:()=>duplicateNode(node.id) },
+      { sep:true },
+      { label:'Delete', danger:true, action:()=>confirmDelete(()=>deleteNode(node.id)) },
     ]);
   });
 }
+
+/* ── Info Panel ── */
+function showInfoPanel(nodeId) {
+  const node = state.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  _infoPanelNodeId = nodeId;
+  infoPanelTitle.textContent = node.type === 'fn' ? 'Function' : 'Conditional';
+  infoPanel.classList.remove('info-panel--hidden');
+
+  const R = Math.round(nodeRadius(node));
+  const isOv = node.sizeOverride != null;
+
+  const typeIcon = node.type === 'fn'
+    ? `<svg width="11" height="11" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>`
+    : `<svg width="11" height="11" viewBox="0 0 16 16"><path d="M8 2L14 8L8 14L2 8Z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>`;
+
+  let h = '';
+  h += `<div class="ip-section" style="margin-bottom:10px"><span class="ip-type-chip ${node.type}">${typeIcon} ${node.type==='fn'?'function':'conditional'}</span></div>`;
+  h += `<div class="ip-section"><div class="ip-label">Name</div><div class="ip-value ip-name">${esc(node.name||'(unnamed)')}</div></div>`;
+  h += `<div class="ip-section"><div class="ip-label">Radius</div><div class="ip-size-tag"><span>${R}px</span>&nbsp;${isOv?`<span style="color:var(--accent-2);font-size:10px">● overridden</span>`:`<span style="color:var(--text-dimmer);font-size:10px">○ auto</span>`}</div></div>`;
+  h += `<div class="ip-divider"></div>`;
+
+  if (node.type === 'fn') {
+    h += `<div class="ip-section"><div class="ip-label">Parameters${node.params?.length?` <span class="ip-badge param">${node.params.length}</span>`:''}</div>`;
+    if (node.params && node.params.length > 0) {
+      h += `<ul class="ip-param-list">`;
+      node.params.forEach(p => {
+        h += `<li class="ip-param-item"><div class="ip-param-name">${esc(p.name||'(unnamed)')}</div>`;
+        if (p.type)    h += `<div class="ip-param-type">: ${esc(p.type)}</div>`;
+        if (p.example) h += `<div class="ip-param-ex">= ${esc(p.example)}</div>`;
+        h += `</li>`;
+      });
+      h += `</ul>`;
+    } else { h += `<div style="color:var(--text-dimmer);font-size:11px;font-family:var(--font-mono)">none</div>`; }
+    h += `</div>`;
+
+    h += `<div class="ip-section"><div class="ip-label">Returns</div>`;
+    if (node.returnType) {
+      h += `<div style="margin-top:2px"><span class="ip-badge">${esc(node.returnType)}</span></div>`;
+      if (node.returnExample) h += `<div style="color:var(--text-dimmer);font-size:11px;font-family:var(--font-mono);margin-top:5px">ex: ${esc(node.returnExample)}</div>`;
+    } else { h += `<div style="color:var(--text-dimmer);font-size:11px;font-family:var(--font-mono)">void</div>`; }
+    h += `</div>`;
+  } else {
+    if (node.branches && node.branches.length > 0) {
+      h += `<div class="ip-section"><div class="ip-label">Branches <span class="ip-badge cond">${node.branches.length}</span></div><ul class="ip-param-list">`;
+      node.branches.forEach(b => { h += `<li class="ip-param-item"><div class="ip-param-name">${esc(b||'(unnamed)')}</div></li>`; });
+      h += `</ul></div>`;
+    }
+  }
+
+  const callers = state.edges.filter(e=>e.to===node.id&&e.type==='call').map(e=>state.nodes.find(n=>n.id===e.from)).filter(Boolean);
+  const callees = state.edges.filter(e=>e.from===node.id&&e.type==='call').map(e=>state.nodes.find(n=>n.id===e.to)).filter(Boolean);
+
+  if (callers.length) {
+    h += `<div class="ip-section"><div class="ip-label">Called by</div>`;
+    callers.forEach(n => { h += `<div class="ip-value ip-nav-link" data-goto="${n.id}" style="font-size:11px">← ${esc(n.name||n.id)}</div>`; });
+    h += `</div>`;
+  }
+  if (callees.length) {
+    h += `<div class="ip-section"><div class="ip-label">Calls</div>`;
+    callees.forEach(n => { h += `<div class="ip-value ip-nav-link" data-goto="${n.id}" style="font-size:11px">→ ${esc(n.name||n.id)}</div>`; });
+    h += `</div>`;
+  }
+
+  if (node.notes) {
+    h += `<div class="ip-divider"></div><div class="ip-section"><div class="ip-label">Notes</div><div class="ip-notes">${esc(node.notes)}</div></div>`;
+  }
+
+  h += `<div class="ip-edit-btn"><button id="ip-edit-btn">✎&nbsp; Edit Node</button></div>`;
+
+  infoPanelBody.innerHTML = h;
+  infoPanelBody.querySelectorAll('.ip-nav-link[data-goto]').forEach(el => {
+    el.style.cursor = 'pointer'; el.style.textDecoration = 'underline';
+    el.addEventListener('click', () => showInfoPanel(el.dataset.goto));
+  });
+  document.getElementById('ip-edit-btn')?.addEventListener('click', () => openNodeModal(nodeId));
+}
+
+function hideInfoPanel() { infoPanel.classList.add('info-panel--hidden'); _infoPanelNodeId = null; }
+document.getElementById('info-panel-close').addEventListener('click', hideInfoPanel);
+
+/* ── Edge tooltip ── */
+function showEdgeTip(e, edge) {
+  let h = `<div class="tt-type">${edge.type.toUpperCase()} edge</div>`;
+  if (edge.dtype)   h += `<div class="tt-data">type: <strong>${edge.dtype}</strong></div>`;
+  if (edge.example) h += `<div class="tt-example">ex: ${edge.example}</div>`;
+  if (edge.label)   h += `<div class="tt-data">label: ${edge.label}</div>`;
+  if (!edge.dtype && !edge.example && !edge.label) h += `<div class="tt-example">(double-click to edit)</div>`;
+  edgeTooltip.innerHTML = h; edgeTooltip.hidden = false;
+  moveEdgeTip(e);
+}
+function moveEdgeTip(e) { edgeTooltip.style.left=(e.clientX+14)+'px'; edgeTooltip.style.top=(e.clientY-8)+'px'; }
 
 function attachEdgeEvents(g, edge) {
-  g.addEventListener('click', e => {
-    e.stopPropagation();
-    state.selectedEdge = edge.id;
-    state.selectedNodes.clear();
-    renderEdges();
-    renderNodes();
-  });
-
-  g.addEventListener('dblclick', e => {
-    e.stopPropagation();
-    openEdgeModal(edge.id);
-  });
-
-  g.addEventListener('mouseenter', e => showEdgeTooltip(e, edge));
-  g.addEventListener('mousemove',  e => moveEdgeTooltip(e));
-  g.addEventListener('mouseleave', ()  => { edgeTooltip.hidden = true; });
-
+  g.addEventListener('click', e => { e.stopPropagation(); state.selectedEdge=edge.id; state.selectedNodes.clear(); renderEdges(); renderNodes(); });
+  g.addEventListener('dblclick', e => { e.stopPropagation(); openEdgeModal(edge.id); });
+  g.addEventListener('mouseenter', e => showEdgeTip(e, edge));
+  g.addEventListener('mousemove',  e => moveEdgeTip(e));
+  g.addEventListener('mouseleave', () => { edgeTooltip.hidden = true; });
   g.addEventListener('contextmenu', e => {
     e.preventDefault();
     showCtxMenu(e.clientX, e.clientY, [
-      { label: 'Edit Edge', action: () => openEdgeModal(edge.id) },
-      { sep: true },
-      { label: 'Delete Edge', action: () => { state.edges = state.edges.filter(ee => ee.id !== edge.id); render(); }, danger: true },
+      { label:'Edit Edge', action:()=>openEdgeModal(edge.id) },
+      { sep:true },
+      { label:'Delete Edge', danger:true, action:()=>{ state.edges=state.edges.filter(ee=>ee.id!==edge.id); render(); } },
     ]);
   });
 }
 
-// ─── Edge tooltip ─────────────────────────────────────────────────────────────
-function showEdgeTooltip(e, edge) {
-  let html = `<div class="tt-type">${edge.type.toUpperCase()} edge</div>`;
-  if (edge.dtype)   html += `<div class="tt-data">type: <strong>${edge.dtype}</strong></div>`;
-  if (edge.example) html += `<div class="tt-example">ex: ${edge.example}</div>`;
-  if (edge.label)   html += `<div class="tt-data">label: ${edge.label}</div>`;
-  if (!edge.dtype && !edge.example && !edge.label) html += `<div class="tt-example">(no metadata — double-click to edit)</div>`;
-  edgeTooltip.innerHTML = html;
-  edgeTooltip.hidden = false;
-  moveEdgeTooltip(e);
-}
-function moveEdgeTooltip(e) {
-  edgeTooltip.style.left = (e.clientX + 14) + 'px';
-  edgeTooltip.style.top  = (e.clientY - 8) + 'px';
+/* ── Edge drag (connect) ── */
+let edgeDrag = null;
+function startEdgeDrag(fromNode, px, py) {
+  edgeDrag = { fromNode, px, py };
+  dragEdge.setAttribute('opacity','1');
+  dragEdge.setAttribute('d',`M${px},${py} L${px},${py}`);
 }
 
-// ─── Interaction: Edge drag (connect tool) ────────────────────────────────────
-let edgeDragState = null;
-
-function startEdgeDrag(e, fromNode, portX, portY) {
-  edgeDragState = { fromNode, portX, portY };
-  dragEdge.setAttribute('opacity', '1');
-  const d = `M${portX},${portY} L${portX},${portY}`;
-  dragEdge.setAttribute('d', d);
-}
-
-// ─── Canvas mouse events ──────────────────────────────────────────────────────
-let panning = false, panStart = null;
-let selBoxStart = null;
-let selBox = null;
+/* ── Canvas events ── */
+let panning=false, panStart=null, selBoxStart=null, selBox=null;
 
 canvasWrap.addEventListener('mousedown', e => {
-  if (e.button === 1 || (e.button === 0 && e.altKey)) {
-    panning = true;
-    panStart = { x: e.clientX - state.pan.x, y: e.clientY - state.pan.y };
-    canvasWrap.classList.add('tool-pan');
-    return;
+  if (e.button===1 || (e.button===0 && e.altKey)) {
+    panning=true; panStart={x:e.clientX-state.pan.x, y:e.clientY-state.pan.y};
+    canvasWrap.classList.add('tool-pan'); return;
   }
-  if (state.tool === 'fn' || state.tool === 'cond') {
+  if (state.tool==='fn' || state.tool==='cond') {
     const pt = svgPt(e.clientX, e.clientY);
-    const node = createNode(state.tool === 'fn' ? 'fn' : 'cond', pt.x, pt.y);
-    openNodeModal(node.id, true);
-    setTool('select');
-    return;
+    const node = createNode(state.tool, pt.x, pt.y);
+    openNodeModal(node.id, true); setTool('select'); return;
   }
-  if (state.tool === 'select' && e.target === svg || e.target.id === 'bg-grid') {
-    state.selectedNodes.clear();
-    state.selectedEdge = null;
-    // start selection box
+  if (state.tool==='select' && (e.target===svg || e.target.id==='bg-grid')) {
+    state.selectedNodes.clear(); state.selectedEdge=null;
     const pt = svgPt(e.clientX, e.clientY);
     selBoxStart = pt;
-    if (!selBox) {
-      selBox = svgEl('rect', { id: 'selection-box' });
-      svg.appendChild(selBox);
-    }
-    selBox.setAttribute('x', pt.x); selBox.setAttribute('y', pt.y);
-    selBox.setAttribute('width', 0); selBox.setAttribute('height', 0);
-    renderNodes();
-    renderEdges();
+    if (!selBox) { selBox=svgEl('rect',{id:'selection-box'}); svg.appendChild(selBox); }
+    selBox.setAttribute('x',pt.x); selBox.setAttribute('y',pt.y); selBox.setAttribute('width',0); selBox.setAttribute('height',0);
+    renderNodes(); renderEdges();
   }
 });
 
 document.addEventListener('mousemove', e => {
-  if (panning) {
-    state.pan.x = e.clientX - panStart.x;
-    state.pan.y = e.clientY - panStart.y;
-    applyTransform();
+  if (panning) { state.pan.x=e.clientX-panStart.x; state.pan.y=e.clientY-panStart.y; applyTransform(); return; }
+  if (dragState && dragState.type==='node') {
+    const pt=svgPt(e.clientX,e.clientY), dx=pt.x-dragState.sp.x, dy=pt.y-dragState.sp.y;
+    if (Math.sqrt(dx*dx+dy*dy)>3) dragState.moved=true;
+    if (dragState.moved) {
+      state.selectedNodes.forEach(id => {
+        const n=state.nodes.find(nn=>nn.id===id);
+        if (n&&dragState.starts[id]) { n.x=dragState.starts[id].x+dx; n.y=dragState.starts[id].y+dy; }
+      });
+      render();
+    }
     return;
   }
-
-  if (dragState && dragState.type === 'node') {
-    const pt = svgPt(e.clientX, e.clientY);
-    const dx = pt.x - dragState.startPt.x;
-    const dy = pt.y - dragState.startPt.y;
-    state.selectedNodes.forEach(id => {
-      const n = state.nodes.find(nn => nn.id === id);
-      if (n && dragState.starts[id]) {
-        n.x = dragState.starts[id].x + dx;
-        n.y = dragState.starts[id].y + dy;
-      }
-    });
-    render();
-    return;
+  if (edgeDrag) {
+    const pt=svgPt(e.clientX,e.clientY);
+    dragEdge.setAttribute('d',cubic(edgeDrag.px,edgeDrag.py,pt.x,pt.y)); return;
   }
-
-  if (edgeDragState) {
-    const pt = svgPt(e.clientX, e.clientY);
-    const { portX, portY } = edgeDragState;
-    dragEdge.setAttribute('d', cubicPath(portX, portY, pt.x, pt.y));
-    return;
-  }
-
-  if (selBoxStart && selBox) {
-    const pt = svgPt(e.clientX, e.clientY);
-    const x  = Math.min(selBoxStart.x, pt.x);
-    const y  = Math.min(selBoxStart.y, pt.y);
-    const w  = Math.abs(pt.x - selBoxStart.x);
-    const h  = Math.abs(pt.y - selBoxStart.y);
-    selBox.setAttribute('x', x); selBox.setAttribute('y', y);
-    selBox.setAttribute('width', w); selBox.setAttribute('height', h);
-    // highlight nodes in box
+  if (selBoxStart&&selBox) {
+    const pt=svgPt(e.clientX,e.clientY);
+    const x=Math.min(selBoxStart.x,pt.x), y=Math.min(selBoxStart.y,pt.y);
+    const w=Math.abs(pt.x-selBoxStart.x), h=Math.abs(pt.y-selBoxStart.y);
+    selBox.setAttribute('x',x); selBox.setAttribute('y',y); selBox.setAttribute('width',w); selBox.setAttribute('height',h);
     state.selectedNodes.clear();
-    state.nodes.forEach(n => {
-      if (n.x >= x && n.x <= x+w && n.y >= y && n.y <= y+h) state.selectedNodes.add(n.id);
-    });
+    state.nodes.forEach(n=>{ if(n.x>=x&&n.x<=x+w&&n.y>=y&&n.y<=y+h) state.selectedNodes.add(n.id); });
     renderNodes();
   }
 });
 
 document.addEventListener('mouseup', e => {
-  if (panning) { panning = false; canvasWrap.classList.remove('tool-pan'); }
-
-  if (dragState) { dragState = null; }
-
-  if (edgeDragState) {
-    const { fromNode } = edgeDragState;
-    const pt = svgPt(e.clientX, e.clientY);
-    // Find target node
-    const target = state.nodes.find(n => {
-      if (n.id === fromNode.id) return false;
-      const dx = n.x - pt.x, dy = n.y - pt.y;
-      const r = n.type === 'fn' ? FN_R + 10 : COND_H + 10;
-      return Math.sqrt(dx*dx+dy*dy) < r;
+  if (panning) { panning=false; canvasWrap.classList.remove('tool-pan'); }
+  if (dragState) { dragState=null; }
+  if (edgeDrag) {
+    const pt=svgPt(e.clientX,e.clientY);
+    const target=state.nodes.find(n=>{
+      if(n.id===edgeDrag.fromNode.id) return false;
+      const dx=n.x-pt.x, dy=n.y-pt.y;
+      return Math.sqrt(dx*dx+dy*dy) < nodeRadius(n)+10;
     });
     if (target) {
-      const edge = { id: uid(), from: fromNode.id, to: target.id, type: 'call', dtype: '', example: '', label: '', color: '' };
-      state.edges.push(edge);
-      render();
-      openEdgeModal(edge.id);
+      const edge={id:uid(),from:edgeDrag.fromNode.id,to:target.id,type:'call',dtype:'',example:'',label:'',color:''};
+      state.edges.push(edge); render(); openEdgeModal(edge.id);
     }
-    dragEdge.setAttribute('opacity', '0');
-    edgeDragState = null;
+    dragEdge.setAttribute('opacity','0'); edgeDrag=null;
   }
-
-  if (selBoxStart) {
-    selBoxStart = null;
-    if (selBox) { selBox.remove(); selBox = null; }
-  }
+  if (selBoxStart) { selBoxStart=null; if(selBox){selBox.remove();selBox=null;} }
 });
 
-// ─── Canvas click: close context menu ─────────────────────────────────────────
 canvasWrap.addEventListener('click', () => removeCtxMenu());
 
-// ─── Zoom ─────────────────────────────────────────────────────────────────────
+/* ── Zoom & pan ── */
 canvasWrap.addEventListener('wheel', e => {
   e.preventDefault();
-  const rect   = svg.getBoundingClientRect();
-  const mouseX = e.clientX - rect.left;
-  const mouseY = e.clientY - rect.top;
-  const factor = e.deltaY < 0 ? 1.1 : 0.9;
-  const newZoom = Math.max(0.15, Math.min(3, state.zoom * factor));
-  state.pan.x = mouseX - (mouseX - state.pan.x) * (newZoom / state.zoom);
-  state.pan.y = mouseY - (mouseY - state.pan.y) * (newZoom / state.zoom);
-  state.zoom  = newZoom;
-  applyTransform();
-}, { passive: false });
+  const r=svg.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const f=e.deltaY<0?1.1:0.9, nz=Math.max(0.15,Math.min(3,state.zoom*f));
+  state.pan.x=mx-(mx-state.pan.x)*(nz/state.zoom); state.pan.y=my-(my-state.pan.y)*(nz/state.zoom);
+  state.zoom=nz; applyTransform();
+}, { passive:false });
 
-document.getElementById('btn-zoom-in').addEventListener('click',  () => zoomBy(1.2));
-document.getElementById('btn-zoom-out').addEventListener('click', () => zoomBy(0.8));
-document.getElementById('btn-fit').addEventListener('click',       fitAll);
-
-function zoomBy(f) {
-  const rect = svg.getBoundingClientRect();
-  const cx = rect.width / 2, cy = rect.height / 2;
-  state.zoom = Math.max(0.15, Math.min(3, state.zoom * f));
-  applyTransform();
-}
+document.getElementById('btn-zoom-in').addEventListener('click',  ()=>{ state.zoom=Math.min(3,state.zoom*1.2); applyTransform(); });
+document.getElementById('btn-zoom-out').addEventListener('click', ()=>{ state.zoom=Math.max(0.15,state.zoom*0.8); applyTransform(); });
+document.getElementById('btn-fit').addEventListener('click', fitAll);
 
 function fitAll() {
   if (!state.nodes.length) return;
-  const rect = svg.getBoundingClientRect();
-  const pad  = 80;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  state.nodes.forEach(n => {
-    const r = n.type === 'fn' ? FN_R : COND_H;
-    minX = Math.min(minX, n.x - r); minY = Math.min(minY, n.y - r);
-    maxX = Math.max(maxX, n.x + r); maxY = Math.max(maxY, n.y + r);
-  });
-  const w = maxX - minX + pad*2, h = maxY - minY + pad*2;
-  state.zoom = Math.max(0.15, Math.min(3, Math.min(rect.width/w, rect.height/h)));
-  state.pan.x = (rect.width  - w * state.zoom) / 2 - (minX - pad) * state.zoom;
-  state.pan.y = (rect.height - h * state.zoom) / 2 - (minY - pad) * state.zoom;
+  const r=svg.getBoundingClientRect(), pad=80;
+  let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+  state.nodes.forEach(n=>{ const r=nodeRadius(n); mnX=Math.min(mnX,n.x-r); mnY=Math.min(mnY,n.y-r); mxX=Math.max(mxX,n.x+r); mxY=Math.max(mxY,n.y+r); });
+  const w=mxX-mnX+pad*2, h=mxY-mnY+pad*2;
+  state.zoom=Math.max(0.15,Math.min(3,Math.min(r.width/w,r.height/h)));
+  state.pan.x=(r.width-w*state.zoom)/2-(mnX-pad)*state.zoom;
+  state.pan.y=(r.height-h*state.zoom)/2-(mnY-pad)*state.zoom;
   applyTransform();
 }
 
-// ─── Node creation ────────────────────────────────────────────────────────────
+/* ── Node CRUD ── */
 function createNode(type, x, y) {
-  const node = { id: uid(), type, x, y, name: '', params: [], returnType: '', returnExample: '', branches: ['if', 'else'], color: '', notes: '' };
-  state.nodes.push(node);
-  render();
-  return node;
+  const node={id:uid(),type,x,y,name:'',params:[],returnType:'',returnExample:'',branches:['if','else'],color:'',notes:'',sizeOverride:null};
+  state.nodes.push(node); render(); return node;
 }
-
 function duplicateNode(id) {
-  const src = state.nodes.find(n => n.id === id);
-  if (!src) return;
-  const node = JSON.parse(JSON.stringify(src));
-  node.id = uid();
-  node.x += 60; node.y += 60;
-  state.nodes.push(node);
-  state.selectedNodes.clear();
-  state.selectedNodes.add(node.id);
-  render();
+  const src=state.nodes.find(n=>n.id===id); if(!src) return;
+  const node=JSON.parse(JSON.stringify(src)); node.id=uid(); node.x+=60; node.y+=60;
+  state.nodes.push(node); state.selectedNodes.clear(); state.selectedNodes.add(node.id); render();
 }
-
 function deleteNode(id) {
-  state.nodes  = state.nodes.filter(n => n.id !== id);
-  state.edges  = state.edges.filter(e => e.from !== id && e.to !== id);
+  state.nodes=state.nodes.filter(n=>n.id!==id);
+  state.edges=state.edges.filter(e=>e.from!==id&&e.to!==id);
   state.selectedNodes.delete(id);
+  if (_infoPanelNodeId===id) hideInfoPanel();
   render();
 }
 
-// ─── Node modal ───────────────────────────────────────────────────────────────
-let _editingNodeId = null;
-let _isNewNode     = false;
+/* ── Node modal ── */
+let _editNodeId=null, _isNew=false, _savedSize=null;
 
-function openNodeModal(id, isNew = false) {
-  _editingNodeId = id;
-  _isNewNode     = isNew;
-  const node = state.nodes.find(n => n.id === id);
-  if (!node) return;
+function openNodeModal(id, isNew=false) {
+  _editNodeId=id; _isNew=isNew;
+  const node=state.nodes.find(n=>n.id===id); if(!node) return;
+  _savedSize = node.sizeOverride ?? null;
 
-  document.getElementById('modal-node-title').textContent = node.type === 'fn' ? (isNew ? 'New Function' : 'Edit Function') : (isNew ? 'New Conditional' : 'Edit Conditional');
-  document.getElementById('node-name').value  = node.name || '';
+  document.getElementById('modal-node-title').textContent =
+    node.type==='fn' ? (isNew?'New Function':'Edit Function') : (isNew?'New Conditional':'Edit Conditional');
+  document.getElementById('node-name').value  = node.name  || '';
   document.getElementById('node-notes').value = node.notes || '';
 
-  const fnFields   = document.getElementById('fn-fields');
-  const condFields = document.getElementById('cond-fields');
-
-  if (node.type === 'fn') {
-    fnFields.hidden   = false;
-    condFields.hidden = true;
-    document.getElementById('return-type').value    = node.returnType || '';
+  const fnF=document.getElementById('fn-fields'), condF=document.getElementById('cond-fields');
+  if (node.type==='fn') {
+    fnF.hidden=false; condF.hidden=true;
+    document.getElementById('return-type').value    = node.returnType    || '';
     document.getElementById('return-example').value = node.returnExample || '';
-    renderParamsList(node.params || []);
+    buildParamList(node.params||[]);
   } else {
-    fnFields.hidden   = true;
-    condFields.hidden = false;
-    renderBranchesList(node.branches || ['if', 'else']);
+    fnF.hidden=true; condF.hidden=false;
+    buildBranchList(node.branches||['if','else']);
   }
 
-  renderColorPicker('node-color-row', NODE_COLORS.map(c => c.fill), node.color || NODE_COLORS[node.type === 'fn' ? 0 : 1].fill, true);
-  modalNode.hidden = false;
-  setTimeout(() => document.getElementById('node-name').focus(), 50);
+  // Size slider
+  const slider=document.getElementById('node-size-slider');
+  const sizeVal=document.getElementById('node-size-val');
+  const autoR=Math.round(computeAutoRadius(node, new Set()));
+  slider.value = node.sizeOverride!=null ? node.sizeOverride : autoR;
+  sizeVal.textContent = node.sizeOverride!=null ? String(Math.round(node.sizeOverride)) : '—';
+  slider.oninput = () => {
+    const v=parseInt(slider.value); sizeVal.textContent=String(v);
+    node.sizeOverride=v; render();
+    if (_infoPanelNodeId===id) showInfoPanel(id);
+  };
+  document.getElementById('node-size-reset').onclick = () => {
+    node.sizeOverride=null; slider.value=autoR; sizeVal.textContent='—';
+    render(); if(_infoPanelNodeId===id) showInfoPanel(id);
+  };
+
+  buildColorPicker('node-color-row', NODE_COLORS.map(c=>c.fill), node.color||NODE_COLORS[node.type==='fn'?0:1].fill, true);
+  modalNode.hidden=false;
+  setTimeout(()=>document.getElementById('node-name').focus(), 50);
 }
 
-function renderParamsList(params) {
-  const list = document.getElementById('params-list');
-  list.innerHTML = '';
-  params.forEach((p, i) => {
-    const row = document.createElement('div');
-    row.className = 'param-row';
-    row.innerHTML = `
-      <input type="text" class="field-input param-name" placeholder="name" value="${esc(p.name||'')}" />
-      <input type="text" class="field-input param-type" placeholder="type" value="${esc(p.type||'')}" />
-      <input type="text" class="field-input param-ex"   placeholder="example" value="${esc(p.example||'')}" />
-      <button class="btn-remove" data-idx="${i}">✕</button>
-    `;
-    row.querySelector('.btn-remove').addEventListener('click', () => {
-      const node = state.nodes.find(n => n.id === _editingNodeId);
-      if (node) { node.params.splice(i, 1); renderParamsList(node.params); }
-    });
+function buildParamList(params) {
+  const list=document.getElementById('params-list'); list.innerHTML='';
+  params.forEach((p,i)=>{
+    const row=document.createElement('div'); row.className='param-row';
+    row.innerHTML=`<input type="text" class="field-input pn" placeholder="name"    value="${esc(p.name||'')}"/>
+                   <input type="text" class="field-input pt" placeholder="type"    value="${esc(p.type||'')}"/>
+                   <input type="text" class="field-input pe" placeholder="example" value="${esc(p.example||'')}"/>
+                   <button class="btn-remove">✕</button>`;
+    row.querySelector('.btn-remove').onclick=()=>{
+      const nd=state.nodes.find(n=>n.id===_editNodeId); if(nd){nd.params.splice(i,1); buildParamList(nd.params);}
+    };
     list.appendChild(row);
   });
 }
 
-function renderBranchesList(branches) {
-  const list = document.getElementById('branches-list');
-  list.innerHTML = '';
-  branches.forEach((b, i) => {
-    const row = document.createElement('div');
-    row.className = 'branch-row';
-    row.innerHTML = `
-      <input type="text" class="field-input branch-name" placeholder="branch label (e.g. else if, error…)" value="${esc(b||'')}" />
-      <button class="btn-remove" data-idx="${i}">✕</button>
-    `;
-    row.querySelector('.btn-remove').addEventListener('click', () => {
-      const node = state.nodes.find(n => n.id === _editingNodeId);
-      if (node) { node.branches.splice(i, 1); renderBranchesList(node.branches); }
-    });
+function buildBranchList(branches) {
+  const list=document.getElementById('branches-list'); list.innerHTML='';
+  branches.forEach((b,i)=>{
+    const row=document.createElement('div'); row.className='branch-row';
+    row.innerHTML=`<input type="text" class="field-input branch-name" placeholder="branch label" value="${esc(b||'')}"/>
+                   <button class="btn-remove">✕</button>`;
+    row.querySelector('.btn-remove').onclick=()=>{
+      const nd=state.nodes.find(n=>n.id===_editNodeId); if(nd){nd.branches.splice(i,1); buildBranchList(nd.branches);}
+    };
     list.appendChild(row);
   });
 }
 
-document.getElementById('add-param-btn').addEventListener('click', () => {
-  const node = state.nodes.find(n => n.id === _editingNodeId);
-  if (!node) return;
-  node.params = node.params || [];
-  node.params.push({ name: '', type: '', example: '' });
-  renderParamsList(node.params);
+document.getElementById('add-param-btn').addEventListener('click',()=>{
+  const nd=state.nodes.find(n=>n.id===_editNodeId); if(!nd) return;
+  nd.params=nd.params||[]; nd.params.push({name:'',type:'',example:''}); buildParamList(nd.params);
+});
+document.getElementById('add-branch-btn').addEventListener('click',()=>{
+  const nd=state.nodes.find(n=>n.id===_editNodeId); if(!nd) return;
+  nd.branches=nd.branches||[]; nd.branches.push(''); buildBranchList(nd.branches);
 });
 
-document.getElementById('add-branch-btn').addEventListener('click', () => {
-  const node = state.nodes.find(n => n.id === _editingNodeId);
-  if (!node) return;
-  node.branches = node.branches || [];
-  node.branches.push('');
-  renderBranchesList(node.branches);
-});
-
-document.getElementById('modal-node-save').addEventListener('click', () => {
-  const node = state.nodes.find(n => n.id === _editingNodeId);
-  if (!node) return;
-  node.name  = document.getElementById('node-name').value.trim() || (node.type === 'fn' ? 'function' : 'condition');
+function saveNodeModal() {
+  const node=state.nodes.find(n=>n.id===_editNodeId); if(!node) return;
+  node.name  = document.getElementById('node-name').value.trim() || (node.type==='fn'?'function':'condition');
   node.notes = document.getElementById('node-notes').value.trim();
-
-  if (node.type === 'fn') {
-    // Collect params
-    node.params = [...document.querySelectorAll('#params-list .param-row')].map(row => ({
-      name:    row.querySelector('.param-name').value.trim(),
-      type:    row.querySelector('.param-type').value.trim(),
-      example: row.querySelector('.param-ex').value.trim(),
-    })).filter(p => p.name || p.type);
+  if (node.type==='fn') {
+    node.params=[...document.querySelectorAll('#params-list .param-row')].map(r=>({
+      name:r.querySelector('.pn').value.trim(), type:r.querySelector('.pt').value.trim(), example:r.querySelector('.pe').value.trim()
+    })).filter(p=>p.name||p.type);
     node.returnType    = document.getElementById('return-type').value.trim();
     node.returnExample = document.getElementById('return-example').value.trim();
-
-    // Auto-create return edge if returnType set and a caller exists
-    if (node.returnType) autoCreateReturnEdge(node);
+    if (node.returnType) autoReturnEdge(node);
   } else {
-    node.branches = [...document.querySelectorAll('#branches-list .branch-name')].map(i => i.value.trim()).filter(Boolean);
+    node.branches=[...document.querySelectorAll('#branches-list .branch-name')].map(i=>i.value.trim()).filter(Boolean);
   }
-
-  node.color = getSelectedColor('node-color-row');
-  modalNode.hidden = true;
-  render();
+  const sv=document.getElementById('node-size-val');
+  node.sizeOverride = sv.textContent==='—' ? null : parseInt(document.getElementById('node-size-slider').value);
+  node.color = getPickedColor('node-color-row');
+  modalNode.hidden=true; render();
+  if (_infoPanelNodeId===_editNodeId) showInfoPanel(_editNodeId);
   showStatus('Saved');
-});
+}
 
-function autoCreateReturnEdge(node) {
-  const callers = state.edges.filter(e => e.to === node.id && e.type === 'call').map(e => e.from);
-  callers.forEach(callerId => {
-    const exists = state.edges.some(e => e.from === node.id && e.to === callerId && e.type === 'return');
-    if (!exists) {
-      state.edges.push({ id: uid(), from: node.id, to: callerId, type: 'return', dtype: node.returnType, example: node.returnExample, label: '', color: '' });
-    }
+function cancelNodeModal() {
+  if (_isNew) { deleteNode(_editNodeId); }
+  else { const nd=state.nodes.find(n=>n.id===_editNodeId); if(nd){nd.sizeOverride=_savedSize; render();} }
+  modalNode.hidden=true;
+}
+
+document.getElementById('modal-node-save').addEventListener('click', saveNodeModal);
+// Register history push BEFORE save handler fires
+document.getElementById('modal-node-save').addEventListener('click', pushHistory, true);
+document.getElementById('modal-node-cancel').addEventListener('click', cancelNodeModal);
+document.getElementById('modal-node-close').addEventListener('click',  cancelNodeModal);
+
+function autoReturnEdge(node) {
+  state.edges.filter(e=>e.to===node.id&&e.type==='call').map(e=>e.from).forEach(cid=>{
+    if (!state.edges.some(e=>e.from===node.id&&e.to===cid&&e.type==='return'))
+      state.edges.push({id:uid(),from:node.id,to:cid,type:'return',dtype:node.returnType,example:node.returnExample,label:'',color:''});
   });
 }
 
-document.getElementById('modal-node-cancel').addEventListener('click', () => {
-  if (_isNewNode) deleteNode(_editingNodeId);
-  modalNode.hidden = true;
-});
-document.getElementById('modal-node-close').addEventListener('click', () => {
-  if (_isNewNode) deleteNode(_editingNodeId);
-  modalNode.hidden = true;
-});
-
-// ─── Edge modal ───────────────────────────────────────────────────────────────
-let _editingEdgeId = null;
+/* ── Edge modal ── */
+let _editEdgeId=null;
 
 function openEdgeModal(id) {
-  _editingEdgeId = id;
-  const edge = state.edges.find(e => e.id === id);
-  if (!edge) return;
-
-  document.querySelectorAll('#edge-type-group input').forEach(r => { r.checked = r.value === edge.type; });
+  _editEdgeId=id;
+  const edge=state.edges.find(e=>e.id===id); if(!edge) return;
+  document.querySelectorAll('#edge-type-group input').forEach(r=>{ r.checked=r.value===edge.type; });
   document.getElementById('edge-dtype').value   = edge.dtype   || '';
   document.getElementById('edge-example').value = edge.example || '';
   document.getElementById('edge-label').value   = edge.label   || '';
-  renderColorPicker('edge-color-row', EDGE_COLORS.map(c => c.val), edge.color || '', false);
-  modalEdge.hidden = false;
+  buildColorPicker('edge-color-row', EDGE_COLORS, edge.color||'', false);
+  modalEdge.hidden=false;
 }
 
-document.getElementById('modal-edge-save').addEventListener('click', () => {
-  const edge = state.edges.find(e => e.id === _editingEdgeId);
-  if (!edge) return;
-  edge.type    = document.querySelector('#edge-type-group input:checked')?.value || 'call';
+document.getElementById('modal-edge-save').addEventListener('click', pushHistory, true);
+document.getElementById('modal-edge-save').addEventListener('click', ()=>{
+  const edge=state.edges.find(e=>e.id===_editEdgeId); if(!edge) return;
+  edge.type    = document.querySelector('#edge-type-group input:checked')?.value||'call';
   edge.dtype   = document.getElementById('edge-dtype').value.trim();
   edge.example = document.getElementById('edge-example').value.trim();
   edge.label   = document.getElementById('edge-label').value.trim();
-  edge.color   = getSelectedColor('edge-color-row');
-  modalEdge.hidden = true;
-  render();
+  edge.color   = getPickedColor('edge-color-row');
+  modalEdge.hidden=true; render();
+  if (_infoPanelNodeId) showInfoPanel(_infoPanelNodeId);
 });
-document.getElementById('modal-edge-cancel').addEventListener('click', () => { modalEdge.hidden = true; });
-document.getElementById('modal-edge-close').addEventListener('click',  () => { modalEdge.hidden = true; });
-document.getElementById('modal-edge-delete').addEventListener('click', () => {
-  state.edges = state.edges.filter(e => e.id !== _editingEdgeId);
-  modalEdge.hidden = true;
-  render();
+document.getElementById('modal-edge-cancel').addEventListener('click', ()=>{ modalEdge.hidden=true; });
+document.getElementById('modal-edge-close').addEventListener('click',  ()=>{ modalEdge.hidden=true; });
+document.getElementById('modal-edge-delete').addEventListener('click', ()=>{
+  state.edges=state.edges.filter(e=>e.id!==_editEdgeId); modalEdge.hidden=true; render();
 });
 
-// ─── Color picker ─────────────────────────────────────────────────────────────
-function renderColorPicker(containerId, colors, current, isNode) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = '';
-  container.dataset.selected = current;
-
-  colors.forEach(c => {
-    const sw = document.createElement('div');
-    sw.className   = 'color-swatch' + (c === current ? ' selected' : '');
-    sw.style.background = c;
-    sw.style.borderColor = isNode
-      ? (NODE_COLORS.find(nc => nc.fill === c)?.border || c)
-      : c;
-    sw.dataset.color = c;
-    sw.addEventListener('click', () => {
-      container.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
-      sw.classList.add('selected');
-      container.dataset.selected = c;
-    });
-    container.appendChild(sw);
+/* ── Color picker ── */
+function buildColorPicker(cid, colors, current, isNode) {
+  const c=document.getElementById(cid); c.innerHTML=''; c.dataset.selected=current;
+  colors.forEach(col=>{
+    const sw=document.createElement('div');
+    sw.className='color-swatch'+(col===current?' selected':'');
+    sw.style.background=col;
+    sw.style.borderColor=isNode?(NODE_COLORS.find(nc=>nc.fill===col)?.border||col):col;
+    sw.dataset.color=col;
+    sw.addEventListener('click',()=>{ c.querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('selected')); sw.classList.add('selected'); c.dataset.selected=col; });
+    c.appendChild(sw);
   });
-
-  // Custom color
-  const custom = document.createElement('div');
-  custom.className = 'color-swatch-custom';
-  custom.title = 'Custom color';
-  custom.innerHTML = `<span>+</span><input type="color" value="${current || '#1a3a5c'}" />`;
-  custom.querySelector('input').addEventListener('input', e => {
-    const val = e.target.value;
-    container.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
-    container.dataset.selected = val;
-    custom.style.background = val;
-  });
-  container.appendChild(custom);
+  const custom=document.createElement('div'); custom.className='color-swatch-custom'; custom.title='Custom';
+  custom.innerHTML=`<span>+</span><input type="color" value="${current||'#1a3a5c'}"/>`;
+  custom.querySelector('input').addEventListener('input',e=>{ const v=e.target.value; c.dataset.selected=v; custom.style.background=v; c.querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('selected')); });
+  c.appendChild(custom);
 }
+function getPickedColor(cid) { return document.getElementById(cid).dataset.selected||''; }
 
-function getSelectedColor(containerId) {
-  return document.getElementById(containerId).dataset.selected || '';
-}
-
-// ─── Context menu ─────────────────────────────────────────────────────────────
-function showCtxMenu(x, y, items) {
+/* ── Context menu ── */
+function showCtxMenu(x,y,items) {
   removeCtxMenu();
-  const menu = document.createElement('div');
-  menu.id = 'ctx-menu';
-  items.forEach(item => {
-    if (item.sep) { const sep = document.createElement('div'); sep.className = 'ctx-sep'; menu.appendChild(sep); return; }
-    const btn = document.createElement('button');
-    btn.textContent = item.label;
-    if (item.danger) btn.classList.add('ctx-danger');
-    btn.addEventListener('click', () => { item.action(); removeCtxMenu(); });
-    menu.appendChild(btn);
+  const m=document.createElement('div'); m.id='ctx-menu';
+  items.forEach(item=>{
+    if(item.sep){const s=document.createElement('div');s.className='ctx-sep';m.appendChild(s);return;}
+    const b=document.createElement('button'); b.textContent=item.label;
+    if(item.danger) b.classList.add('ctx-danger');
+    b.addEventListener('click',()=>{item.action();removeCtxMenu();});
+    m.appendChild(b);
   });
-  menu.style.left = x + 'px'; menu.style.top = y + 'px';
-  document.body.appendChild(menu);
+  m.style.left=x+'px'; m.style.top=y+'px';
+  document.body.appendChild(m);
 }
-function removeCtxMenu() { document.getElementById('ctx-menu')?.remove(); }
+function removeCtxMenu(){document.getElementById('ctx-menu')?.remove();}
 
-// ─── Confirm dialog ───────────────────────────────────────────────────────────
-function confirmDelete(onOk, msg = 'Are you sure you want to delete this?') {
-  document.getElementById('confirm-msg').textContent = msg;
-  modalConfirm.hidden = false;
-  document.getElementById('confirm-ok').onclick = () => { modalConfirm.hidden = true; onOk(); };
-  document.getElementById('confirm-cancel').onclick = () => { modalConfirm.hidden = true; };
+/* ── Confirm ── */
+function confirmDelete(onOk, msg='Delete this?') {
+  document.getElementById('confirm-msg').textContent=msg;
+  modalConfirm.hidden=false;
+  document.getElementById('confirm-ok').onclick=()=>{ modalConfirm.hidden=true; onOk(); };
+  document.getElementById('confirm-cancel').onclick=()=>{ modalConfirm.hidden=true; };
 }
 
-// ─── Toolbar buttons ──────────────────────────────────────────────────────────
-document.getElementById('btn-select').addEventListener('click',   () => setTool('select'));
-document.getElementById('btn-add-fn').addEventListener('click',   () => setTool('fn'));
-document.getElementById('btn-add-cond').addEventListener('click', () => setTool('cond'));
-document.getElementById('btn-connect').addEventListener('click',  () => setTool('connect'));
-document.getElementById('btn-delete').addEventListener('click',   () => {
-  if (state.selectedNodes.size) {
-    confirmDelete(() => { state.selectedNodes.forEach(id => deleteNode(id)); state.selectedNodes.clear(); render(); }, `Delete ${state.selectedNodes.size} node(s)?`);
-  } else if (state.selectedEdge) {
-    state.edges = state.edges.filter(e => e.id !== state.selectedEdge);
-    state.selectedEdge = null; render();
-  }
+/* ── Toolbar ── */
+document.getElementById('btn-select').addEventListener('click',   ()=>setTool('select'));
+document.getElementById('btn-add-fn').addEventListener('click',   ()=>setTool('fn'));
+document.getElementById('btn-add-cond').addEventListener('click', ()=>setTool('cond'));
+document.getElementById('btn-connect').addEventListener('click',  ()=>setTool('connect'));
+document.getElementById('btn-delete').addEventListener('click', ()=>{
+  if (state.selectedNodes.size) { confirmDelete(()=>{ state.selectedNodes.forEach(id=>deleteNode(id)); state.selectedNodes.clear(); render(); },`Delete ${state.selectedNodes.size} node(s)?`); }
+  else if (state.selectedEdge) { state.edges=state.edges.filter(e=>e.id!==state.selectedEdge); state.selectedEdge=null; render(); }
 });
-document.getElementById('btn-clear').addEventListener('click', () => {
-  confirmDelete(() => { state.nodes = []; state.edges = []; state.selectedNodes.clear(); state.selectedEdge = null; render(); }, 'Clear entire canvas?');
+document.getElementById('btn-clear').addEventListener('click',()=>{
+  confirmDelete(()=>{ state.nodes=[]; state.edges=[]; state.selectedNodes.clear(); state.selectedEdge=null; hideInfoPanel(); render(); },'Clear entire canvas?');
 });
 
-// ─── Keyboard shortcuts ────────────────────────────────────────────────────────
-document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  const k = e.key.toLowerCase();
-  if (k === 'v') setTool('select');
-  if (k === 'f') setTool('fn');
-  if (k === 'c') setTool('cond');
-  if (k === 'e') setTool('connect');
-  if (k === 'delete' || k === 'backspace') {
-    state.selectedNodes.forEach(id => deleteNode(id));
-    if (state.selectedEdge) { state.edges = state.edges.filter(ee => ee.id !== state.selectedEdge); state.selectedEdge = null; }
-    state.selectedNodes.clear();
-    render();
-  }
-  if (k === 'escape') {
-    state.selectedNodes.clear(); state.selectedEdge = null;
-    modalNode.hidden = true; modalEdge.hidden = true; modalConfirm.hidden = true;
-    removeCtxMenu();
-    render();
-  }
-  if ((e.ctrlKey || e.metaKey) && k === 'a') {
-    e.preventDefault();
-    state.nodes.forEach(n => state.selectedNodes.add(n.id));
-    render();
-  }
-  if ((e.ctrlKey || e.metaKey) && k === 's') {
-    e.preventDefault(); saveToFile();
-  }
-  if ((e.ctrlKey || e.metaKey) && k === 'z') {
-    e.preventDefault(); undo();
-  }
+/* ── Keyboard ── */
+document.addEventListener('keydown', e=>{
+  if (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  const k=e.key.toLowerCase();
+  if(k==='v') setTool('select');
+  if(k==='f') setTool('fn');
+  if(k==='c') setTool('cond');
+  if(k==='e') setTool('connect');
+  if(k==='delete'||k==='backspace'){ state.selectedNodes.forEach(id=>deleteNode(id)); if(state.selectedEdge){state.edges=state.edges.filter(ee=>ee.id!==state.selectedEdge);state.selectedEdge=null;} state.selectedNodes.clear(); render(); }
+  if(k==='escape'){ state.selectedNodes.clear(); state.selectedEdge=null; modalNode.hidden=true; modalEdge.hidden=true; modalConfirm.hidden=true; hideInfoPanel(); removeCtxMenu(); render(); }
+  if((e.ctrlKey||e.metaKey)&&k==='a'){ e.preventDefault(); state.nodes.forEach(n=>state.selectedNodes.add(n.id)); render(); }
+  if((e.ctrlKey||e.metaKey)&&k==='s'){ e.preventDefault(); saveFile(); }
+  if((e.ctrlKey||e.metaKey)&&k==='z'){ e.preventDefault(); undo(); }
 });
 
-// ─── Undo ─────────────────────────────────────────────────────────────────────
-const history = [];
-const HISTORY_MAX = 40;
-
+/* ── Undo ── */
+const history=[]; const HMAX=40;
 function pushHistory() {
-  history.push(JSON.stringify({ nodes: state.nodes, edges: state.edges, nextId: state.nextId }));
-  if (history.length > HISTORY_MAX) history.shift();
+  history.push(JSON.stringify({nodes:state.nodes,edges:state.edges,nextId:state.nextId}));
+  if(history.length>HMAX) history.shift();
 }
+document.getElementById('confirm-ok').addEventListener('click', pushHistory, true);
 
 function undo() {
-  if (!history.length) { showStatus('Nothing to undo'); return; }
-  const snap = JSON.parse(history.pop());
-  state.nodes  = snap.nodes;
-  state.edges  = snap.edges;
-  state.nextId = snap.nextId;
-  state.selectedNodes.clear();
-  state.selectedEdge = null;
-  render();
-  showStatus('Undo');
+  if(!history.length){showStatus('Nothing to undo');return;}
+  const s=JSON.parse(history.pop());
+  state.nodes=s.nodes; state.edges=s.edges; state.nextId=s.nextId;
+  state.selectedNodes.clear(); state.selectedEdge=null;
+  if(_infoPanelNodeId&&!state.nodes.find(n=>n.id===_infoPanelNodeId)) hideInfoPanel();
+  else if(_infoPanelNodeId) showInfoPanel(_infoPanelNodeId);
+  render(); showStatus('Undo');
 }
 
-// Wrap createNode/deleteNode to push history
-const _origCreateNode = createNode;
-// Monkey-patch render to auto-push after meaningful ops — simple approach: push before each modal save
-document.getElementById('modal-node-save').addEventListener('click', () => pushHistory(), true);
-document.getElementById('modal-edge-save').addEventListener('click', () => pushHistory(), true);
-document.getElementById('confirm-ok').addEventListener('click',      () => pushHistory(), true);
-
-// ─── Export ───────────────────────────────────────────────────────────────────
-document.getElementById('btn-export').addEventListener('click', () => {
-  const svgEl2 = svg.cloneNode(true);
-  svgEl2.setAttribute('width',  svg.clientWidth);
-  svgEl2.setAttribute('height', svg.clientHeight);
-  const blob = new Blob([svgEl2.outerHTML], { type: 'image/svg+xml' });
-  const url  = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'callflow.svg';
-  a.click(); URL.revokeObjectURL(url);
+/* ── Export / Save / Load ── */
+document.getElementById('btn-export').addEventListener('click',()=>{
+  const c=svg.cloneNode(true); c.setAttribute('width',svg.clientWidth); c.setAttribute('height',svg.clientHeight);
+  const blob=new Blob([c.outerHTML],{type:'image/svg+xml'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='callflow.svg'; a.click(); URL.revokeObjectURL(url);
   showStatus('Exported SVG');
 });
 
-function saveToFile() {
-  const data = JSON.stringify({ version: 1, nodes: state.nodes, edges: state.edges, nextId: state.nextId }, null, 2);
-  const blob = new Blob([data], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'diagram.callflow.json';
-  a.click(); URL.revokeObjectURL(url);
-  showStatus('Saved to file');
+function saveFile() {
+  const data=JSON.stringify({version:1,nodes:state.nodes,edges:state.edges,nextId:state.nextId},null,2);
+  const blob=new Blob([data],{type:'application/json'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='diagram.callflow.json'; a.click(); URL.revokeObjectURL(url);
+  showStatus('Saved');
 }
-document.getElementById('btn-save').addEventListener('click', saveToFile);
+document.getElementById('btn-save').addEventListener('click', saveFile);
 
-document.getElementById('btn-load').addEventListener('click', () => {
-  document.getElementById('file-load-input').click();
-});
-document.getElementById('file-load-input').addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
+document.getElementById('btn-load').addEventListener('click',()=>document.getElementById('file-load-input').click());
+document.getElementById('file-load-input').addEventListener('change',e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
     try {
-      const data = JSON.parse(ev.target.result);
-      pushHistory();
-      state.nodes  = data.nodes  || [];
-      state.edges  = data.edges  || [];
-      state.nextId = data.nextId || 100;
-      state.selectedNodes.clear();
-      state.selectedEdge = null;
-      render(); fitAll();
-      showStatus('Loaded');
+      const d=JSON.parse(ev.target.result); pushHistory();
+      state.nodes=d.nodes||[]; state.edges=d.edges||[]; state.nextId=d.nextId||100;
+      state.selectedNodes.clear(); state.selectedEdge=null; hideInfoPanel();
+      render(); fitAll(); showStatus('Loaded');
     } catch { showStatus('Error loading file'); }
   };
-  reader.readAsText(file);
-  e.target.value = '';
+  reader.readAsText(file); e.target.value='';
 });
 
-// ─── Minimap ──────────────────────────────────────────────────────────────────
+/* ── Minimap ── */
 function drawMinimap() {
-  const W = minimap.width, H = minimap.height;
-  mmCtx.clearRect(0, 0, W, H);
-  mmCtx.fillStyle = '#12151c';
-  mmCtx.fillRect(0, 0, W, H);
+  const W=minimap.width, H=minimap.height;
+  mmCtx.clearRect(0,0,W,H); mmCtx.fillStyle='#12151c'; mmCtx.fillRect(0,0,W,H);
+  if(!state.nodes.length) return;
 
-  if (!state.nodes.length) return;
+  let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+  state.nodes.forEach(n=>{ const r=nodeRadius(n); mnX=Math.min(mnX,n.x-r); mnY=Math.min(mnY,n.y-r); mxX=Math.max(mxX,n.x+r); mxY=Math.max(mxY,n.y+r); });
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  state.nodes.forEach(n => {
-    const r = n.type === 'fn' ? FN_R : COND_H;
-    minX = Math.min(minX, n.x - r); minY = Math.min(minY, n.y - r);
-    maxX = Math.max(maxX, n.x + r); maxY = Math.max(maxY, n.y + r);
+  const pad=12, scX=(W-pad*2)/(mxX-mnX||1), scY=(H-pad*2)/(mxY-mnY||1), sc=Math.min(scX,scY);
+  const ox=pad+((W-pad*2)-(mxX-mnX)*sc)/2, oy=pad+((H-pad*2)-(mxY-mnY)*sc)/2;
+  const mm=(x,y)=>({x:ox+(x-mnX)*sc, y:oy+(y-mnY)*sc});
+
+  mmCtx.strokeStyle='rgba(77,232,178,0.3)'; mmCtx.lineWidth=0.8;
+  state.edges.forEach(edge=>{
+    const fn=state.nodes.find(n=>n.id===edge.from), tn=state.nodes.find(n=>n.id===edge.to); if(!fn||!tn) return;
+    const fp=mm(fn.x,fn.y), tp=mm(tn.x,tn.y);
+    mmCtx.beginPath(); mmCtx.moveTo(fp.x,fp.y); mmCtx.lineTo(tp.x,tp.y); mmCtx.stroke();
   });
 
-  const pad   = 12;
-  const scaleX = (W - pad*2) / (maxX - minX || 1);
-  const scaleY = (H - pad*2) / (maxY - minY || 1);
-  const scale  = Math.min(scaleX, scaleY);
-  const offX   = pad + ((W - pad*2) - (maxX - minX) * scale) / 2;
-  const offY   = pad + ((H - pad*2) - (maxY - minY) * scale) / 2;
-
-  const toMM = (x, y) => ({ x: offX + (x - minX) * scale, y: offY + (y - minY) * scale });
-
-  // Draw edges
-  mmCtx.strokeStyle = 'rgba(77,232,178,0.3)';
-  mmCtx.lineWidth = 0.8;
-  state.edges.forEach(edge => {
-    const fn = state.nodes.find(n => n.id === edge.from);
-    const tn = state.nodes.find(n => n.id === edge.to);
-    if (!fn || !tn) return;
-    const fp = toMM(fn.x, fn.y), tp = toMM(tn.x, tn.y);
-    mmCtx.beginPath();
-    mmCtx.moveTo(fp.x, fp.y);
-    mmCtx.lineTo(tp.x, tp.y);
-    mmCtx.stroke();
+  state.nodes.forEach(n=>{
+    const p=mm(n.x,n.y), col=getNodeColor(n), r=nodeRadius(n);
+    mmCtx.fillStyle=col.fill; mmCtx.strokeStyle=col.border; mmCtx.lineWidth=0.8;
+    if(n.type==='fn'){ mmCtx.beginPath(); mmCtx.arc(p.x,p.y,Math.max(2,r*sc),0,Math.PI*2); mmCtx.fill(); mmCtx.stroke(); }
+    else { const s=Math.max(2,r*sc); mmCtx.beginPath(); mmCtx.moveTo(p.x,p.y-s); mmCtx.lineTo(p.x+s,p.y); mmCtx.lineTo(p.x,p.y+s); mmCtx.lineTo(p.x-s,p.y); mmCtx.closePath(); mmCtx.fill(); mmCtx.stroke(); }
   });
 
-  // Draw nodes
-  state.nodes.forEach(n => {
-    const p = toMM(n.x, n.y);
-    const col = getNodeColor(n);
-    mmCtx.fillStyle = col.fill;
-    mmCtx.strokeStyle = col.border;
-    mmCtx.lineWidth = 0.8;
-    if (n.type === 'fn') {
-      mmCtx.beginPath(); mmCtx.arc(p.x, p.y, Math.max(3, FN_R * scale), 0, Math.PI*2); mmCtx.fill(); mmCtx.stroke();
-    } else {
-      const s = Math.max(3, COND_H * scale);
-      mmCtx.beginPath();
-      mmCtx.moveTo(p.x, p.y-s); mmCtx.lineTo(p.x+s, p.y); mmCtx.lineTo(p.x, p.y+s); mmCtx.lineTo(p.x-s, p.y);
-      mmCtx.closePath(); mmCtx.fill(); mmCtx.stroke();
-    }
-  });
-
-  // Viewport rect
-  const rect = svg.getBoundingClientRect();
-  const vpX1 = (-state.pan.x) / state.zoom;
-  const vpY1 = (-state.pan.y) / state.zoom;
-  const vpW  = rect.width  / state.zoom;
-  const vpH  = rect.height / state.zoom;
-  const vp   = toMM(vpX1, vpY1);
-  mmCtx.strokeStyle = 'rgba(77,232,178,0.5)';
-  mmCtx.lineWidth = 1;
-  mmCtx.strokeRect(vp.x, vp.y, vpW * scale, vpH * scale);
+  const svgR=svg.getBoundingClientRect(), vp=mm(-state.pan.x/state.zoom,-state.pan.y/state.zoom);
+  mmCtx.strokeStyle='rgba(77,232,178,0.5)'; mmCtx.lineWidth=1;
+  mmCtx.strokeRect(vp.x,vp.y,(svgR.width/state.zoom)*sc,(svgR.height/state.zoom)*sc);
 }
 
-minimap.addEventListener('click', e => {
-  const rect  = minimap.getBoundingClientRect();
-  const mx    = e.clientX - rect.left, my = e.clientY - rect.top;
-  const W = minimap.width, H = minimap.height;
-  if (!state.nodes.length) return;
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  state.nodes.forEach(n => { const r = n.type==='fn'?FN_R:COND_H; minX=Math.min(minX,n.x-r); minY=Math.min(minY,n.y-r); maxX=Math.max(maxX,n.x+r); maxY=Math.max(maxY,n.y+r); });
-  const pad=12, scaleX=(W-pad*2)/(maxX-minX||1), scaleY=(H-pad*2)/(maxY-minY||1), scale=Math.min(scaleX,scaleY);
-  const offX=pad+((W-pad*2)-(maxX-minX)*scale)/2, offY=pad+((H-pad*2)-(maxY-minY)*scale)/2;
-
-  const worldX = (mx - offX) / scale + minX;
-  const worldY = (my - offY) / scale + minY;
-  const svgRect = svg.getBoundingClientRect();
-  state.pan.x = svgRect.width/2  - worldX * state.zoom;
-  state.pan.y = svgRect.height/2 - worldY * state.zoom;
+minimap.addEventListener('click',e=>{
+  const r=minimap.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const W=minimap.width, H=minimap.height; if(!state.nodes.length) return;
+  let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+  state.nodes.forEach(n=>{ const r=nodeRadius(n); mnX=Math.min(mnX,n.x-r); mnY=Math.min(mnY,n.y-r); mxX=Math.max(mxX,n.x+r); mxY=Math.max(mxY,n.y+r); });
+  const pad=12,scX=(W-pad*2)/(mxX-mnX||1),scY=(H-pad*2)/(mxY-mnY||1),sc=Math.min(scX,scY);
+  const ox=pad+((W-pad*2)-(mxX-mnX)*sc)/2, oy=pad+((H-pad*2)-(mxY-mnY)*sc)/2;
+  const worldX=(mx-ox)/sc+mnX, worldY=(my-oy)/sc+mnY;
+  const sr=svg.getBoundingClientRect();
+  state.pan.x=sr.width/2-worldX*state.zoom; state.pan.y=sr.height/2-worldY*state.zoom;
   applyTransform();
 });
 
-// ─── Escape helper ────────────────────────────────────────────────────────────
-function esc(str) { return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
-
-// ─── Demo starter graph ───────────────────────────────────────────────────────
+/* ── Demo graph ── */
 function loadDemo() {
-  state.nodes = [
-    { id:'n1', type:'fn',   x:200,  y:200,  name:'main',        params:[{name:'args',type:'string[]',example:'["--verbose"]'}], returnType:'void', returnExample:'', color:'', notes:'Entry point' },
-    { id:'n2', type:'fn',   x:440,  y:120,  name:'fetchData',   params:[{name:'url',type:'string',example:'"https://api.example.com"'}], returnType:'Promise<Data>', returnExample:'{ id:1, name:"Alice" }', color:'', notes:'' },
-    { id:'n3', type:'cond', x:440,  y:320,  name:'isValid?',    params:[], returnType:'', returnExample:'', branches:['true','false'], color:'', notes:'' },
-    { id:'n4', type:'fn',   x:620,  y:220,  name:'processData', params:[{name:'data',type:'Data',example:'{ id:1 }'}], returnType:'Result', returnExample:'{ status:"ok" }', color:'', notes:'' },
-    { id:'n5', type:'fn',   x:620,  y:420,  name:'handleError', params:[{name:'err',type:'Error',example:'new Error("404")'}], returnType:'void', returnExample:'', color:'#3d1a1a', notes:'' },
-    { id:'n6', type:'fn',   x:200,  y:420,  name:'render',      params:[{name:'result',type:'Result',example:'{ status:"ok" }'}], returnType:'void', returnExample:'', color:'#1a3d2e', notes:'' },
+  state.nodes=[
+    {id:'n1',type:'fn',  x:220,y:230,name:'main',       params:[{name:'args',type:'string[]',example:'["--verbose"]'}],returnType:'void',          returnExample:'',branches:[],          color:'',        notes:'Entry point',sizeOverride:null},
+    {id:'n2',type:'fn',  x:460,y:130,name:'fetchData',  params:[{name:'url', type:'string',  example:'"https://api.example.com"'}],returnType:'Promise<Data>',returnExample:'{ id:1 }',branches:[],color:'',        notes:'',           sizeOverride:null},
+    {id:'n3',type:'cond',x:460,y:340,name:'isValid?',   params:[],returnType:'',returnExample:'',branches:['true','false'],color:'',notes:'',sizeOverride:null},
+    {id:'n4',type:'fn',  x:660,y:230,name:'processData',params:[{name:'data',type:'Data',    example:'{ id:1 }'}],      returnType:'Result',       returnExample:'{ status:"ok" }',branches:[],color:'',        notes:'',           sizeOverride:null},
+    {id:'n5',type:'fn',  x:660,y:440,name:'handleError',params:[{name:'err', type:'Error',   example:'new Error("404")'}],returnType:'void',       returnExample:'',branches:[],          color:'#3d1a1a', notes:'',           sizeOverride:null},
+    {id:'n6',type:'fn',  x:220,y:440,name:'render',     params:[{name:'result',type:'Result',example:'{ status:"ok" }'}],returnType:'void',        returnExample:'',branches:[],          color:'#1a3d2e', notes:'',           sizeOverride:null},
   ];
-  state.edges = [
-    { id:'e1', from:'n1', to:'n2',   type:'call',   dtype:'string',        example:'"https://api.example.com"', label:'',      color:'' },
-    { id:'e2', from:'n2', to:'n1',   type:'return',  dtype:'Promise<Data>', example:'{ id:1 }',                 label:'data',  color:'' },
-    { id:'e3', from:'n1', to:'n3',   type:'call',   dtype:'Data',          example:'{ id:1 }',                  label:'',      color:'' },
-    { id:'e4', from:'n3', to:'n4',   type:'cond',   dtype:'boolean',       example:'true',                      label:'true',  color:'' },
-    { id:'e5', from:'n3', to:'n5',   type:'cond',   dtype:'boolean',       example:'false',                     label:'false', color:'' },
-    { id:'e6', from:'n4', to:'n1',   type:'return',  dtype:'Result',        example:'{ status:"ok" }',           label:'result',color:'' },
-    { id:'e7', from:'n1', to:'n6',   type:'call',   dtype:'Result',        example:'{ status:"ok" }',           label:'',      color:'' },
+  state.edges=[
+    {id:'e1',from:'n1',to:'n2',type:'call',  dtype:'string',       example:'"https://api.example.com"',label:'',      color:''},
+    {id:'e2',from:'n2',to:'n1',type:'return',dtype:'Promise<Data>',example:'{ id:1 }',                label:'data',  color:''},
+    {id:'e3',from:'n1',to:'n3',type:'call',  dtype:'Data',         example:'{ id:1 }',                label:'',      color:''},
+    {id:'e4',from:'n3',to:'n4',type:'cond',  dtype:'boolean',      example:'true',                    label:'true',  color:''},
+    {id:'e5',from:'n3',to:'n5',type:'cond',  dtype:'boolean',      example:'false',                   label:'false', color:''},
+    {id:'e6',from:'n4',to:'n1',type:'return',dtype:'Result',       example:'{ status:"ok" }',         label:'result',color:''},
+    {id:'e7',from:'n1',to:'n6',type:'call',  dtype:'Result',       example:'{ status:"ok" }',         label:'',      color:''},
   ];
-  state.nextId = 100;
-  render();
-  setTimeout(fitAll, 100);
+  state.nextId=100; render(); setTimeout(fitAll,100);
 }
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+/* ── Init ── */
 applyTransform();
 loadDemo();
-
-// ─── PWA Service Worker ───────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
-}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});

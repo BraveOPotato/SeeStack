@@ -1,226 +1,230 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#0d0f14" />
-  <meta name="description" content="CallFlow – Interactive function call & data flow visualizer" />
-  <link rel="manifest" href="manifest.json" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="theme-color" content="#0d0f14"/>
+  <meta name="description" content="CallFlow – Interactive function call & data flow visualizer"/>
+  <link rel="manifest" href="manifest.json"/>
   <title>CallFlow</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@300;400;500;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-  <div id="app">
-    <!-- Toolbar -->
-    <header id="toolbar">
-      <div class="toolbar-brand">
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-          <circle cx="11" cy="11" r="10" stroke="var(--accent)" stroke-width="1.5"/>
-          <path d="M7 11 L15 11 M11 7 L15 11 L11 15" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>CallFlow</span>
-      </div>
-      <div class="toolbar-actions">
-        <button class="tool-btn active" id="btn-select" title="Select / Move (V)" data-key="v">
-          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 2L13 8L8 9.5L6 14L3 2Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>
-          <span>Select</span>
-        </button>
-        <button class="tool-btn" id="btn-add-fn" title="Add Function Node (F)" data-key="f">
-          <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5.5 8H10.5M8 5.5V10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          <span>Function</span>
-        </button>
-        <button class="tool-btn" id="btn-add-cond" title="Add Conditional Node (C)" data-key="c">
-          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2L14 8L8 14L2 8Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M8 5V11M5 8H11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          <span>Conditional</span>
-        </button>
-        <button class="tool-btn" id="btn-connect" title="Connect Nodes (E)" data-key="e">
-          <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="3" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="13" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5 8H11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M9.5 6L11 8L9.5 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Connect</span>
-        </button>
-        <div class="toolbar-sep"></div>
-        <button class="tool-btn" id="btn-delete" title="Delete selected (Del)">
-          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 5H13M6 5V3H10V5M5 5L5.5 13H10.5L11 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
-          <span>Delete</span>
-        </button>
-        <button class="tool-btn" id="btn-clear" title="Clear canvas">
-          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 4H14M5 4V2H11V4M4 4L4.5 14H11.5L12 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>
-          <span>Clear</span>
-        </button>
-        <div class="toolbar-sep"></div>
-        <button class="tool-btn" id="btn-export" title="Export as PNG">
-          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2V10M5 7L8 10L11 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12V14H14V12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          <span>Export</span>
-        </button>
-        <button class="tool-btn" id="btn-save" title="Save to file">
-          <svg width="16" height="16" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="none"/><rect x="5" y="2" width="6" height="4" stroke="currentColor" stroke-width="1.4" fill="none"/><rect x="4" y="9" width="8" height="5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
-          <span>Save</span>
-        </button>
-        <button class="tool-btn" id="btn-load" title="Load from file">
-          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 10V13H14V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 2V10M5 5L8 2L11 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Load</span>
-        </button>
-      </div>
-      <div class="toolbar-right">
-        <span id="status-msg" class="status-msg"></span>
-        <button class="tool-btn icon-only" id="btn-zoom-out" title="Zoom out">−</button>
-        <span id="zoom-label" class="zoom-label">100%</span>
-        <button class="tool-btn icon-only" id="btn-zoom-in" title="Zoom in">+</button>
-        <button class="tool-btn icon-only" id="btn-fit" title="Fit to screen">⊞</button>
-      </div>
-    </header>
+<div id="app">
 
-    <!-- Canvas area -->
+  <!-- Toolbar -->
+  <header id="toolbar">
+    <div class="toolbar-brand">
+      <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
+        <circle cx="11" cy="11" r="10" stroke="var(--accent)" stroke-width="1.5"/>
+        <path d="M7 11L15 11M11 7L15 11L11 15" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>CallFlow</span>
+    </div>
+    <div class="toolbar-actions">
+      <button class="tool-btn active" id="btn-select" title="Select / Move (V)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 2L13 8L8 9.5L6 14L3 2Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>
+        <span>Select</span>
+      </button>
+      <button class="tool-btn" id="btn-add-fn" title="Add Function Node (F)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5.5 8H10.5M8 5.5V10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>Function</span>
+      </button>
+      <button class="tool-btn" id="btn-add-cond" title="Add Conditional Node (C)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 2L14 8L8 14L2 8Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M8 5.5V10.5M5.5 8H10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>Conditional</span>
+      </button>
+      <button class="tool-btn" id="btn-connect" title="Connect Nodes (E)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><circle cx="3" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="13" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5 8H11M9.5 6L11 8L9.5 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Connect</span>
+      </button>
+      <div class="toolbar-sep"></div>
+      <button class="tool-btn" id="btn-delete" title="Delete selected (Del)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 5H13M6 5V3H10V5M5 5L5.5 13H10.5L11 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        <span>Delete</span>
+      </button>
+      <button class="tool-btn" id="btn-clear" title="Clear canvas">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M2 4H14M5 4V2H11V4M4 4L4.5 14H11.5L12 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>
+        <span>Clear</span>
+      </button>
+      <div class="toolbar-sep"></div>
+      <button class="tool-btn" id="btn-export" title="Export SVG">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 2V10M5 7L8 10L11 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12V14H14V12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>Export</span>
+      </button>
+      <button class="tool-btn" id="btn-save" title="Save (Ctrl+S)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="none"/><rect x="5" y="2" width="6" height="4" stroke="currentColor" stroke-width="1.4" fill="none"/><rect x="4" y="9" width="8" height="5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+        <span>Save</span>
+      </button>
+      <button class="tool-btn" id="btn-load" title="Load from file">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M2 10V13H14V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 2V10M5 5L8 2L11 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Load</span>
+      </button>
+    </div>
+    <div class="toolbar-right">
+      <span id="status-msg" class="status-msg"></span>
+      <button class="tool-btn icon-only" id="btn-zoom-out" title="Zoom out">−</button>
+      <span id="zoom-label" class="zoom-label">100%</span>
+      <button class="tool-btn icon-only" id="btn-zoom-in" title="Zoom in">+</button>
+      <button class="tool-btn icon-only" id="btn-fit" title="Fit to screen">⊞</button>
+    </div>
+  </header>
+
+  <!-- Main area: canvas + info panel -->
+  <div id="main-area">
+
+    <!-- Canvas -->
     <div id="canvas-wrap">
       <svg id="svg-canvas" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <marker id="arrow-default" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
             <path d="M0,0 L0,6 L8,3 z" fill="var(--edge-default)"/>
           </marker>
-          <marker id="arrow-return" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L8,3 z" fill="var(--edge-return)"/>
-          </marker>
-          <marker id="arrow-param" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L8,3 z" fill="var(--edge-param)"/>
-          </marker>
-          <marker id="arrow-cond" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L8,3 z" fill="var(--edge-cond)"/>
-          </marker>
           <filter id="glow">
             <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-          <filter id="glow-strong">
-            <feGaussianBlur stdDeviation="5" result="coloredBlur"/>
             <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
           <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
             <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(255,255,255,0.035)" stroke-width="0.5"/>
           </pattern>
         </defs>
-        <!-- Background grid -->
         <rect id="bg-grid" width="100%" height="100%" fill="url(#grid)"/>
-        <!-- Edge group (rendered below nodes) -->
         <g id="edges-group"></g>
-        <!-- Nodes group -->
         <g id="nodes-group"></g>
-        <!-- Live drag edge -->
         <path id="drag-edge" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 3" opacity="0" marker-end="url(#arrow-default)"/>
       </svg>
-    </div>
 
-    <!-- Minimap -->
-    <canvas id="minimap" width="160" height="100" title="Minimap"></canvas>
+      <!-- Minimap -->
+      <canvas id="minimap" width="160" height="100" title="Minimap"></canvas>
 
-    <!-- Help overlay -->
-    <div id="help-bar">
-      <kbd>V</kbd> Select &nbsp;·&nbsp; <kbd>F</kbd> Function &nbsp;·&nbsp; <kbd>C</kbd> Conditional &nbsp;·&nbsp; <kbd>E</kbd> Connect &nbsp;·&nbsp; <kbd>Del</kbd> Delete &nbsp;·&nbsp; <kbd>Scroll</kbd> Zoom &nbsp;·&nbsp; <kbd>Space+Drag</kbd> Pan &nbsp;·&nbsp; Double-click node to edit
-    </div>
-  </div>
-
-  <!-- ===== MODALS ===== -->
-
-  <!-- Node Edit Modal -->
-  <div id="modal-node" class="modal-overlay" hidden>
-    <div class="modal-box">
-      <div class="modal-header">
-        <h2 id="modal-node-title">Edit Function</h2>
-        <button class="modal-close" id="modal-node-close">✕</button>
+      <!-- Help bar -->
+      <div id="help-bar">
+        <kbd>V</kbd> Select &nbsp;·&nbsp;
+        <kbd>F</kbd> Function &nbsp;·&nbsp;
+        <kbd>C</kbd> Conditional &nbsp;·&nbsp;
+        <kbd>E</kbd> Connect &nbsp;·&nbsp;
+        <kbd>Del</kbd> Delete &nbsp;·&nbsp;
+        <kbd>Scroll</kbd> Zoom &nbsp;·&nbsp;
+        <kbd>Alt+Drag</kbd> Pan &nbsp;·&nbsp;
+        Click node for info &nbsp;·&nbsp; Double-click to edit
       </div>
-      <div class="modal-body">
-        <label class="field-label">Name <span class="req">*</span></label>
-        <input type="text" id="node-name" class="field-input" placeholder="functionName" autocomplete="off" />
+    </div><!-- /canvas-wrap -->
 
-        <div id="fn-fields">
-          <div class="field-section-header">
-            <label class="field-label">Parameters</label>
-            <button class="btn-small" id="add-param-btn">+ Add Parameter</button>
-          </div>
-          <div id="params-list"></div>
+    <!-- Info Panel -->
+    <aside id="info-panel" class="info-panel info-panel--hidden">
+      <div class="info-panel-header">
+        <span id="info-panel-title" class="info-panel-title">Node Info</span>
+        <button id="info-panel-close" class="info-panel-close" title="Close (Esc)">✕</button>
+      </div>
+      <div id="info-panel-body" class="info-panel-body"></div>
+    </aside>
 
-          <label class="field-label mt">Return Type</label>
-          <div class="row-2">
-            <input type="text" id="return-type" class="field-input" placeholder="e.g. string, number, User[]" />
-            <input type="text" id="return-example" class="field-input" placeholder='Example value (e.g. "hello")' />
-          </div>
+  </div><!-- /main-area -->
+
+</div><!-- /app -->
+
+<!-- Node Modal -->
+<div id="modal-node" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="modal-node-title">Edit Function</h2>
+      <button class="modal-close" id="modal-node-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">Name <span class="req">*</span></label>
+      <input type="text" id="node-name" class="field-input" placeholder="functionName" autocomplete="off"/>
+
+      <div id="fn-fields">
+        <div class="field-section-header">
+          <label class="field-label" style="margin:0">Parameters</label>
+          <button class="btn-small" id="add-param-btn">+ Add Parameter</button>
         </div>
-
-        <div id="cond-fields" hidden>
-          <div class="field-section-header">
-            <label class="field-label">Branches</label>
-            <button class="btn-small" id="add-branch-btn">+ Add Branch</button>
-          </div>
-          <div id="branches-list"></div>
+        <div id="params-list"></div>
+        <label class="field-label mt">Return Type</label>
+        <div class="row-2">
+          <input type="text" id="return-type"    class="field-input" placeholder="e.g. string, User[]"/>
+          <input type="text" id="return-example" class="field-input" placeholder='Example value'/>
         </div>
-
-        <label class="field-label mt">Node Color</label>
-        <div class="color-row" id="node-color-row"></div>
-
-        <label class="field-label mt">Notes</label>
-        <textarea id="node-notes" class="field-input" rows="2" placeholder="Optional notes…"></textarea>
       </div>
-      <div class="modal-footer">
-        <button class="btn-ghost" id="modal-node-cancel">Cancel</button>
-        <button class="btn-primary" id="modal-node-save">Save</button>
-      </div>
-    </div>
-  </div>
 
-  <!-- Edge Edit Modal -->
-  <div id="modal-edge" class="modal-overlay" hidden>
-    <div class="modal-box modal-box--sm">
-      <div class="modal-header">
-        <h2>Edge Properties</h2>
-        <button class="modal-close" id="modal-edge-close">✕</button>
-      </div>
-      <div class="modal-body">
-        <label class="field-label">Edge Type</label>
-        <div class="radio-group" id="edge-type-group">
-          <label><input type="radio" name="edge-type" value="call" checked /> Call</label>
-          <label><input type="radio" name="edge-type" value="return" /> Return</label>
-          <label><input type="radio" name="edge-type" value="param" /> Param Source</label>
-          <label><input type="radio" name="edge-type" value="cond" /> Condition</label>
+      <div id="cond-fields" hidden>
+        <div class="field-section-header">
+          <label class="field-label" style="margin:0">Branches</label>
+          <button class="btn-small" id="add-branch-btn">+ Add Branch</button>
         </div>
-        <label class="field-label mt">Data Type</label>
-        <input type="text" id="edge-dtype" class="field-input" placeholder="e.g. string, User, boolean" />
-        <label class="field-label mt">Example Data</label>
-        <input type="text" id="edge-example" class="field-input" placeholder='e.g. "hello" or {id:1}' />
-        <label class="field-label mt">Label (optional)</label>
-        <input type="text" id="edge-label" class="field-input" placeholder="e.g. else, true, error…" />
-        <label class="field-label mt">Edge Color</label>
-        <div class="color-row" id="edge-color-row"></div>
+        <div id="branches-list"></div>
       </div>
-      <div class="modal-footer">
-        <button class="btn-ghost" id="modal-edge-delete" style="margin-right:auto;color:var(--danger)">Delete Edge</button>
-        <button class="btn-ghost" id="modal-edge-cancel">Cancel</button>
-        <button class="btn-primary" id="modal-edge-save">Save</button>
+
+      <label class="field-label mt">Node Color</label>
+      <div class="color-row" id="node-color-row"></div>
+
+      <label class="field-label mt">Size Override</label>
+      <div class="size-override-row">
+        <input type="range" id="node-size-slider" min="16" max="120" step="1" class="size-slider"/>
+        <span id="node-size-val" class="size-val">—</span>
+        <button id="node-size-reset" class="btn-small">Reset</button>
       </div>
+
+      <label class="field-label mt">Notes</label>
+      <textarea id="node-notes" class="field-input" rows="2" placeholder="Optional notes…"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-node-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-node-save">Save</button>
     </div>
   </div>
+</div>
 
-  <!-- Edge Tooltip -->
-  <div id="edge-tooltip" class="edge-tooltip" hidden></div>
-
-  <!-- Confirm Modal -->
-  <div id="modal-confirm" class="modal-overlay" hidden>
-    <div class="modal-box modal-box--xs">
-      <div class="modal-header">
-        <h2 id="confirm-title">Confirm</h2>
+<!-- Edge Modal -->
+<div id="modal-edge" class="modal-overlay" hidden>
+  <div class="modal-box modal-box--sm">
+    <div class="modal-header">
+      <h2>Edge Properties</h2>
+      <button class="modal-close" id="modal-edge-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">Edge Type</label>
+      <div class="radio-group" id="edge-type-group">
+        <label><input type="radio" name="edge-type" value="call" checked/> Call</label>
+        <label><input type="radio" name="edge-type" value="return"/> Return</label>
+        <label><input type="radio" name="edge-type" value="param"/> Param Source</label>
+        <label><input type="radio" name="edge-type" value="cond"/> Condition</label>
       </div>
-      <div class="modal-body">
-        <p id="confirm-msg"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-ghost" id="confirm-cancel">Cancel</button>
-        <button class="btn-danger" id="confirm-ok">Confirm</button>
-      </div>
+      <label class="field-label mt">Data Type</label>
+      <input type="text" id="edge-dtype"   class="field-input" placeholder="e.g. string, User"/>
+      <label class="field-label mt">Example Data</label>
+      <input type="text" id="edge-example" class="field-input" placeholder='e.g. "hello" or {id:1}'/>
+      <label class="field-label mt">Label (optional)</label>
+      <input type="text" id="edge-label"   class="field-input" placeholder="e.g. else, true, error…"/>
+      <label class="field-label mt">Edge Color</label>
+      <div class="color-row" id="edge-color-row"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-edge-delete" style="margin-right:auto;color:var(--danger)">Delete Edge</button>
+      <button class="btn-ghost" id="modal-edge-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-edge-save">Save</button>
     </div>
   </div>
+</div>
 
-  <input type="file" id="file-load-input" accept=".callflow.json" hidden />
+<!-- Edge Tooltip -->
+<div id="edge-tooltip" class="edge-tooltip" hidden></div>
 
-  <script src="app.js"></script>
+<!-- Confirm Modal -->
+<div id="modal-confirm" class="modal-overlay" hidden>
+  <div class="modal-box modal-box--xs">
+    <div class="modal-header"><h2 id="confirm-title">Confirm</h2></div>
+    <div class="modal-body"><p id="confirm-msg"></p></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="confirm-cancel">Cancel</button>
+      <button class="btn-danger" id="confirm-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-load-input" accept=".callflow.json" hidden/>
+<script src="app.js"></script>
 </body>
 </html>
