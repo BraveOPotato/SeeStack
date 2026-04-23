@@ -280,3 +280,18 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   /* dashed via outline trick */
   box-shadow: 0 0 0 1px rgba(77,232,178,0.3);
 }
+
+/* ── Zone tool cursor ── */
+#canvas-wrap.tool-zone { cursor: crosshair; }
+
+/* ── Zone nodes in SVG ── */
+.zone-handle { opacity: 0.6; transition: opacity 0.15s; }
+.zone-handle:hover { opacity: 1; }
+
+/* ── Zone color swatches ── */
+.zone-color-swatch {
+  width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.zone-color-swatch:hover    { transform: scale(1.1); }
+.zone-color-swatch.selected { transform: scale(1.1); box-shadow: 0 0 0 2px var(--text); }

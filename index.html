@@ -35,6 +35,10 @@
         <svg width="13" height="13" viewBox="0 0 16 16"><path d="M8 2L14 8L8 14L2 8Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M8 5.5V10.5M5.5 8H10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
         <span>Conditional</span>
       </button>
+      <button class="tool-btn" id="btn-add-zone" title="Add Zone (Z)">
+        <svg width="13" height="13" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.4" fill="none" stroke-dasharray="3 2"/><path d="M4 5H12M4 8H9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        <span>Zone</span>
+      </button>
       <button class="tool-btn" id="btn-connect" title="Connect (E)">
         <svg width="13" height="13" viewBox="0 0 16 16"><circle cx="3" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="13" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5 8H11M9.5 6L11 8L9.5 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Connect</span>
@@ -96,6 +100,7 @@
           </pattern>
         </defs>
         <rect id="bg-grid" width="100%" height="100%" fill="url(#grid)"/>
+        <g id="zones-group"></g>
         <g id="edges-group"></g>
         <g id="nodes-group"></g>
         <path id="drag-edge" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 3" opacity="0" marker-end="url(#arrow-default)"/>
@@ -192,6 +197,26 @@
       <button class="btn-ghost" id="modal-edge-delete" style="margin-right:auto;color:var(--danger)">Delete</button>
       <button class="btn-ghost" id="modal-edge-cancel">Cancel</button>
       <button class="btn-primary" id="modal-edge-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Zone Modal -->
+<div id="modal-zone" class="modal-overlay" hidden>
+  <div class="modal-box modal-box--sm">
+    <div class="modal-header">
+      <h2>Zone Properties</h2>
+      <button class="modal-close" id="modal-zone-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">Label</label>
+      <input type="text" id="zone-label-input" class="field-input" placeholder="e.g. Core, Services, Auth…"/>
+      <label class="field-label mt">Color</label>
+      <div class="color-row" id="zone-color-row"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="modal-zone-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-zone-save">Save</button>
     </div>
   </div>
 </div>
