@@ -160,70 +160,37 @@ function inferEdgeType(fromNode,toNode){
 }
 
 /* ── Focus highlight helpers ── */
-// Returns {litNodes: Set<id>, litEdges: Set<id>} for a clicked fn node.
-// Traverses through cond nodes to find fn parents/children.
+// Returns {litNodes: Set<id>, litEdges: Set<id>}.
+// fn click: immediate fn parents + fn children (hopping through cond chains).
+// cond click: upstream fn (hopping back through cond chains) + all downstream fn branches.
 function computeFocusSet(nodeId){
   const litNodes=new Set([nodeId]);
   const litEdges=new Set();
 
-  // Walk from a fn node toward children (outgoing edges), skip through cond nodes
-  function walkChildren(fnId){
-    state.edges.filter(e=>e.from===fnId).forEach(e=>{
-      const target=state.nodes.find(n=>n.id===e.to);
-      if(!target) return;
-      litEdges.add(e.id);
-      if(target.type==='cond'){
-        litNodes.add(target.id);
-        // from cond outward
-        state.edges.filter(e2=>e2.from===target.id).forEach(e2=>{
-          const t2=state.nodes.find(n=>n.id===e2.to);
-          if(!t2) return;
-          litEdges.add(e2.id);
-          if(t2.type==='fn') litNodes.add(t2.id);
-          // one more cond hop if needed
-          if(t2.type==='cond'){
-            litNodes.add(t2.id);
-            state.edges.filter(e3=>e3.from===t2.id).forEach(e3=>{
-              const t3=state.nodes.find(n=>n.id===e3.to);
-              if(t3&&t3.type==='fn'){litEdges.add(e3.id);litNodes.add(t3.id);}
-            });
-          }
-        });
-      } else if(target.type==='fn'){
-        litNodes.add(target.id);
-      }
+  // Walk downstream: light edges+nodes; recurse through cond, stop at fn.
+  function walkDown(fromId,visited=new Set()){
+    if(visited.has(fromId)) return; visited.add(fromId);
+    state.edges.filter(e=>e.from===fromId).forEach(e=>{
+      const t=state.nodes.find(n=>n.id===e.to); if(!t) return;
+      litEdges.add(e.id); litNodes.add(t.id);
+      if(t.type==='cond') walkDown(t.id,visited);
     });
   }
 
-  // Walk from a fn node toward parents (incoming edges), skip through cond nodes
-  function walkParents(fnId){
-    state.edges.filter(e=>e.to===fnId).forEach(e=>{
-      const src=state.nodes.find(n=>n.id===e.from);
-      if(!src) return;
-      litEdges.add(e.id);
-      if(src.type==='cond'){
-        litNodes.add(src.id);
-        state.edges.filter(e2=>e2.to===src.id).forEach(e2=>{
-          const s2=state.nodes.find(n=>n.id===e2.from);
-          if(!s2) return;
-          litEdges.add(e2.id);
-          if(s2.type==='fn') litNodes.add(s2.id);
-          if(s2.type==='cond'){
-            litNodes.add(s2.id);
-            state.edges.filter(e3=>e3.to===s2.id).forEach(e3=>{
-              const s3=state.nodes.find(n=>n.id===e3.from);
-              if(s3&&s3.type==='fn'){litEdges.add(e3.id);litNodes.add(s3.id);}
-            });
-          }
-        });
-      } else if(src.type==='fn'){
-        litNodes.add(src.id);
-      }
+  // Walk upstream: light edges+nodes; recurse through cond, stop at fn.
+  function walkUp(fromId,visited=new Set()){
+    if(visited.has(fromId)) return; visited.add(fromId);
+    state.edges.filter(e=>e.to===fromId).forEach(e=>{
+      const s=state.nodes.find(n=>n.id===e.from); if(!s) return;
+      litEdges.add(e.id); litNodes.add(s.id);
+      if(s.type==='cond') walkUp(s.id,visited);
     });
   }
 
-  walkChildren(nodeId);
-  walkParents(nodeId);
+  const node=state.nodes.find(n=>n.id===nodeId);
+  if(!node) return{litNodes,litEdges};
+  walkDown(nodeId);
+  walkUp(nodeId);
   return{litNodes,litEdges};
 }
 
@@ -492,7 +459,7 @@ function attachNodeEvents(g,node){
 function showInfoPanel(nodeId){
   const node=state.nodes.find(n=>n.id===nodeId);if(!node) return;
   _infoPanelNodeId=nodeId;
-  state.focusNodeId=node.type==='fn'?nodeId:null;
+  state.focusNodeId=nodeId;
   render();
   infoPanelTitle.textContent=node.type==='fn'?'Function':'Conditional';
   infoPanel.classList.remove('info-panel--hidden');
