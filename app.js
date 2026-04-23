@@ -1,4 +1,4 @@
-/* ===== CallFlow ===== */
+/* ===== SeeStack ===== */
 'use strict';
 
 const state = {
@@ -58,7 +58,7 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').re
 function trunc(s,n){return s&&s.length>n?s.slice(0,n-1)+'…':(s||'');}
 
 /* ── Persistence ── */
-const LS_KEY='callflow_diagram';
+const LS_KEY='seestack_diagram';
 function persistSave(){
   try{
     localStorage.setItem(LS_KEY,JSON.stringify({
@@ -859,13 +859,13 @@ function undo(){
 document.getElementById('btn-export').addEventListener('click',()=>{
   const c=svg.cloneNode(true);c.setAttribute('width',svg.clientWidth);c.setAttribute('height',svg.clientHeight);
   const blob=new Blob([c.outerHTML],{type:'image/svg+xml'}),url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='callflow.svg';a.click();URL.revokeObjectURL(url);
+  const a=document.createElement('a');a.href=url;a.download='seestack.svg';a.click();URL.revokeObjectURL(url);
   showStatus('Exported SVG');
 });
 function saveFile(){
   const data=JSON.stringify({version:3,nodes:state.nodes,edges:state.edges,zones:state.zones,nextId:state.nextId,pan:state.pan,zoom:state.zoom},null,2);
   const blob=new Blob([data],{type:'application/json'}),url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='diagram.callflow.json';a.click();URL.revokeObjectURL(url);
+  const a=document.createElement('a');a.href=url;a.download='diagram.seestack.json';a.click();URL.revokeObjectURL(url);
   showStatus('Saved');
 }
 document.getElementById('btn-save').addEventListener('click',saveFile);
@@ -944,8 +944,17 @@ function loadDemo(){
 }
 
 /* ── Init ── */
-applyTransform();
 if(!persistLoad()){loadDemo();}
-render();
-if(!localStorage.getItem(LS_KEY)) setTimeout(fitAll,100);
+// Double rAF ensures the browser has fully laid out the SVG before we
+// apply the stored transform or compute fitAll — otherwise
+// getBoundingClientRect() returns 0 and the view appears broken until
+// the user interacts.
+requestAnimationFrame(()=>{
+  requestAnimationFrame(()=>{
+    const hasSavedView = !!localStorage.getItem(LS_KEY);
+    applyTransform();
+    render();
+    if(!hasSavedView) fitAll();
+  });
+});
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});

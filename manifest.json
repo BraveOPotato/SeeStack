@@ -1,6 +1,6 @@
 {
-  "name": "CallFlow – Function Flow Visualizer",
-  "short_name": "CallFlow",
+  "name": "SeeStack – Function Flow Visualizer",
+  "short_name": "SeeStack",
   "description": "Interactive call stack and data flow diagram tool",
   "start_url": "/",
   "display": "standalone",
