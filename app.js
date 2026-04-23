@@ -5,6 +5,7 @@ const state = {
   nodes:[], edges:[], zones:[],
   selectedNodes:new Set(), selectedEdge:null, selectedZone:null,
   searchMatches:new Set(),
+  focusNodeId:null,
   tool:'select',
   zoom:1, pan:{x:0,y:0},
   nextId:1,
@@ -158,7 +159,75 @@ function inferEdgeType(fromNode,toNode){
   return 'call';
 }
 
-/* ── Render ── */
+/* ── Focus highlight helpers ── */
+// Returns {litNodes: Set<id>, litEdges: Set<id>} for a clicked fn node.
+// Traverses through cond nodes to find fn parents/children.
+function computeFocusSet(nodeId){
+  const litNodes=new Set([nodeId]);
+  const litEdges=new Set();
+
+  // Walk from a fn node toward children (outgoing edges), skip through cond nodes
+  function walkChildren(fnId){
+    state.edges.filter(e=>e.from===fnId).forEach(e=>{
+      const target=state.nodes.find(n=>n.id===e.to);
+      if(!target) return;
+      litEdges.add(e.id);
+      if(target.type==='cond'){
+        litNodes.add(target.id);
+        // from cond outward
+        state.edges.filter(e2=>e2.from===target.id).forEach(e2=>{
+          const t2=state.nodes.find(n=>n.id===e2.to);
+          if(!t2) return;
+          litEdges.add(e2.id);
+          if(t2.type==='fn') litNodes.add(t2.id);
+          // one more cond hop if needed
+          if(t2.type==='cond'){
+            litNodes.add(t2.id);
+            state.edges.filter(e3=>e3.from===t2.id).forEach(e3=>{
+              const t3=state.nodes.find(n=>n.id===e3.to);
+              if(t3&&t3.type==='fn'){litEdges.add(e3.id);litNodes.add(t3.id);}
+            });
+          }
+        });
+      } else if(target.type==='fn'){
+        litNodes.add(target.id);
+      }
+    });
+  }
+
+  // Walk from a fn node toward parents (incoming edges), skip through cond nodes
+  function walkParents(fnId){
+    state.edges.filter(e=>e.to===fnId).forEach(e=>{
+      const src=state.nodes.find(n=>n.id===e.from);
+      if(!src) return;
+      litEdges.add(e.id);
+      if(src.type==='cond'){
+        litNodes.add(src.id);
+        state.edges.filter(e2=>e2.to===src.id).forEach(e2=>{
+          const s2=state.nodes.find(n=>n.id===e2.from);
+          if(!s2) return;
+          litEdges.add(e2.id);
+          if(s2.type==='fn') litNodes.add(s2.id);
+          if(s2.type==='cond'){
+            litNodes.add(s2.id);
+            state.edges.filter(e3=>e3.to===s2.id).forEach(e3=>{
+              const s3=state.nodes.find(n=>n.id===e3.from);
+              if(s3&&s3.type==='fn'){litEdges.add(e3.id);litNodes.add(s3.id);}
+            });
+          }
+        });
+      } else if(src.type==='fn'){
+        litNodes.add(src.id);
+      }
+    });
+  }
+
+  walkChildren(nodeId);
+  walkParents(nodeId);
+  return{litNodes,litEdges};
+}
+
+
 function render(){renderZones();renderEdges();renderNodes();drawMinimap();}
 
 /* ── Zones ── */
@@ -260,6 +329,7 @@ function renderNodes(){
   const existing=new Set([...nodesGroup.querySelectorAll('[data-nid]')].map(e=>e.dataset.nid));
   const current=new Set(state.nodes.map(n=>n.id));
   existing.forEach(id=>{if(!current.has(id)) nodesGroup.querySelector(`[data-nid="${id}"]`)?.remove();});
+  const focus=state.focusNodeId?computeFocusSet(state.focusNodeId):null;
   state.nodes.forEach(node=>{
     let g=nodesGroup.querySelector(`[data-nid="${node.id}"]`);
     if(!g){g=svgEl('g',{'data-nid':node.id,class:'node'});nodesGroup.appendChild(g);attachNodeEvents(g,node);}
@@ -269,6 +339,7 @@ function renderNodes(){
     else drawCondNode(g,node,col,sel,hit);
     drawPorts(g,node);
     sel?g.classList.add('selected'):g.classList.remove('selected');
+    g.style.opacity=(focus&&!focus.litNodes.has(node.id))?'0.15':'';
   });
 }
 
@@ -360,6 +431,7 @@ function renderEdges(){
   const existing=new Set([...edgesGroup.querySelectorAll('[data-eid]')].map(e=>e.dataset.eid));
   const current=new Set(state.edges.map(e=>e.id));
   existing.forEach(id=>{if(!current.has(id)) edgesGroup.querySelector(`[data-eid="${id}"]`)?.remove();});
+  const focus=state.focusNodeId?computeFocusSet(state.focusNodeId):null;
   state.edges.forEach(edge=>{
     const fn=state.nodes.find(n=>n.id===edge.from),tn=state.nodes.find(n=>n.id===edge.to);
     if(!fn||!tn) return;
@@ -383,6 +455,7 @@ function renderEdges(){
       g.appendChild(svgEl('rect',{x:mx-lw/2,y:my-9,width:lw,height:16,rx:3,class:'edge-label-bg'}));
       g.appendChild(svgTxt(edge.label,{x:mx,y:my+1,class:'edge-label'}));
     }
+    g.style.opacity=(focus&&!focus.litEdges.has(edge.id))?'0.08':'';
   });
 }
 
@@ -419,6 +492,8 @@ function attachNodeEvents(g,node){
 function showInfoPanel(nodeId){
   const node=state.nodes.find(n=>n.id===nodeId);if(!node) return;
   _infoPanelNodeId=nodeId;
+  state.focusNodeId=node.type==='fn'?nodeId:null;
+  render();
   infoPanelTitle.textContent=node.type==='fn'?'Function':'Conditional';
   infoPanel.classList.remove('info-panel--hidden');
   const R=Math.round(nodeRadius(node)),isOv=node.sizeOverride!=null;
@@ -452,7 +527,7 @@ function showInfoPanel(nodeId){
   infoPanelBody.querySelectorAll('.ip-nav-link[data-goto]').forEach(el=>{el.style.cursor='pointer';el.style.textDecoration='underline';el.addEventListener('click',()=>showInfoPanel(el.dataset.goto));});
   document.getElementById('ip-edit-btn')?.addEventListener('click',()=>openNodeModal(nodeId));
 }
-function hideInfoPanel(){infoPanel.classList.add('info-panel--hidden');_infoPanelNodeId=null;}
+function hideInfoPanel(){infoPanel.classList.add('info-panel--hidden');_infoPanelNodeId=null;state.focusNodeId=null;render();}
 document.getElementById('info-panel-close').addEventListener('click',hideInfoPanel);
 
 /* ── Search ── */
