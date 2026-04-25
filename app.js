@@ -554,6 +554,11 @@ function attachEdgeEvents(g,edge){
 }
 
 /* ── Edge drag ── */
+// Move dragEdge into edgesGroup so it shares the pan+zoom transform.
+// In HTML it sits directly in <svg> (no transform), causing the preview
+// path to be offset whenever pan/zoom != identity.
+edgesGroup.appendChild(dragEdge);
+
 let edgeDrag=null;
 function startEdgeDrag(fromNode,px,py){
   edgeDrag={fromNode,px,py};
