@@ -295,3 +295,71 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 }
 .zone-color-swatch:hover    { transform: scale(1.1); }
 .zone-color-swatch.selected { transform: scale(1.1); box-shadow: 0 0 0 2px var(--text); }
+
+/* ── Loop variables ── */
+:root { --loop-accent: #ffc850; --loop-accent-dim: rgba(255,200,80,0.12); }
+
+/* ── Loop box on main canvas ── */
+.loop-box-group { cursor: pointer; }
+.loop-box-rect {
+  transition: filter 0.15s;
+}
+.loop-box-group:hover .loop-box-rect { filter: brightness(1.2); }
+.loop-box-enter-btn {
+  cursor: pointer; opacity: 0.8; transition: opacity 0.15s;
+}
+.loop-box-group:hover .loop-box-enter-btn { opacity: 1; }
+
+/* ── Loop modal overlay ── */
+.loop-modal-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: var(--bg); display: flex; flex-direction: column;
+  animation: fadeIn 0.18s ease;
+}
+.loop-modal-overlay[hidden] { display: none; }
+
+.loop-modal-box {
+  display: flex; flex-direction: column; height: 100%;
+}
+
+.loop-modal-header {
+  height: var(--toolbar-h); background: rgba(255,200,80,0.06);
+  border-bottom: 1px solid rgba(255,200,80,0.25);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px; flex-shrink: 0; gap: 12px; user-select: none;
+}
+.loop-modal-title-wrap {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.loop-modal-label {
+  font-family: var(--font-mono); font-size: 11px; color: var(--loop-accent);
+  letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.8;
+}
+.loop-modal-name {
+  font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+  color: var(--loop-accent); letter-spacing: 0.04em;
+}
+.loop-modal-actions {
+  display: flex; align-items: center; gap: 4px; margin-left: auto;
+}
+
+.loop-canvas-wrap {
+  flex: 1; position: relative; overflow: hidden; background: var(--bg);
+  border: 2px solid rgba(255,200,80,0.15); border-top: none;
+}
+
+.loop-help-bar {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(18,21,28,0.88); border: 1px solid var(--border);
+  border-radius: 20px; padding: 5px 16px; font-size: 10.5px; font-family: var(--font-mono);
+  color: var(--text-dimmer); pointer-events: none; white-space: nowrap;
+}
+.loop-help-bar kbd {
+  background: var(--bg-3); border: 1px solid var(--border-bright);
+  border-radius: 3px; padding: 0 4px; font-size: 9.5px; color: var(--text-dim);
+}
+
+/* Loop condition node badge */
+.loop-cond-badge {
+  pointer-events: none;
+}

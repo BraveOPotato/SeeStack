@@ -195,7 +195,7 @@ function computeFocusSet(nodeId){
 }
 
 
-function render(){renderZones();renderEdges();renderNodes();drawMinimap();}
+function render(){renderZones();renderEdges();renderNodes();drawMinimap();renderLoops();}
 
 /* ── Zones ── */
 function renderZones(){
@@ -1005,3 +1005,908 @@ requestAnimationFrame(()=>{
   });
 });
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+/* ════════════════════════════════════════════════
+   LOOP FEATURE
+   ════════════════════════════════════════════════ */
+
+/* ── State ── */
+state.loops = state.loops || [];
+
+/* ── Render loops on main canvas (in zonesGroup layer) ── */
+function renderLoops(){
+  // Remove stale
+  [...zonesGroup.querySelectorAll('[data-lid]')].forEach(el=>{
+    if(!state.loops.find(l=>l.id===el.dataset.lid)) el.remove();
+  });
+  state.loops.forEach(loop=>{
+    let g=zonesGroup.querySelector(`[data-lid="${loop.id}"]`);
+    if(!g){
+      g=svgEl('g',{'data-lid':loop.id,'class':'loop-box-group'});
+      zonesGroup.appendChild(g);
+      attachLoopBoxEvents(g,loop);
+    }
+    g.innerHTML='';
+    const sel=state.selectedZone===loop.id;
+    const W=loop.w||240, H=loop.h||200;
+    const HEADER=28, PAD=8;
+
+    // Search hit highlight
+    const hasSearchHit=state.loopSearchMatches&&state.loopSearchMatches.has(loop.id);
+    if(hasSearchHit){
+      g.appendChild(svgEl('rect',{x:loop.x-4,y:loop.y-4,width:W+8,height:H+8,rx:12,
+        fill:'none',stroke:'#ffe066','stroke-width':2,opacity:0.7,'stroke-dasharray':'4 3','pointer-events':'none'}));
+    }
+
+    // Outer glow
+    g.appendChild(svgEl('rect',{x:loop.x-2,y:loop.y-2,width:W+4,height:H+4,rx:11,
+      fill:'none',stroke:'rgba(255,200,80,0.1)','stroke-width':5,'pointer-events':'none'}));
+
+    // Main body
+    const bodyRect=svgEl('rect',{x:loop.x,y:loop.y,width:W,height:H,rx:9,
+      'class':'loop-box-rect',
+      fill:'rgba(14,16,22,0.92)',
+      stroke:sel?'rgba(255,200,80,0.95)':hasSearchHit?'#ffe066':'rgba(255,200,80,0.5)',
+      'stroke-width':sel?2.5:1.8,'stroke-dasharray':'7 3'});
+    g.appendChild(bodyRect);
+
+    // Header bar
+    g.appendChild(svgEl('rect',{x:loop.x,y:loop.y,width:W,height:HEADER,rx:9,
+      fill:'rgba(255,200,80,0.1)','pointer-events':'none'}));
+    g.appendChild(svgEl('rect',{x:loop.x,y:loop.y+HEADER-8,width:W,height:8,
+      fill:'rgba(255,200,80,0.1)','pointer-events':'none'}));
+
+    // ↺ icon
+    const icon=svgEl('text',{x:loop.x+10,y:loop.y+HEADER-8,
+      'font-size':15,'font-family':'sans-serif',fill:'#ffc850','pointer-events':'none',opacity:0.9});
+    icon.textContent='↺';
+    g.appendChild(icon);
+
+    // Title
+    const maxTitleChars=Math.floor((W-54)/7);
+    g.appendChild(svgTxt(trunc(loop.label||'loop',maxTitleChars),{
+      x:loop.x+28,y:loop.y+HEADER-8,
+      'font-family':"'Martian Mono',monospace",'font-size':11,'font-weight':'600',
+      fill:'#ffc850','pointer-events':'none',opacity:0.95}));
+
+    // Search hit badge in header
+    if(hasSearchHit){
+      const hits=state.loopSearchMatches.get(loop.id);
+      const n=hits.size;
+      g.appendChild(svgEl('rect',{x:loop.x+W-46,y:loop.y+6,width:38,height:15,rx:7,
+        fill:'rgba(255,224,102,0.2)',stroke:'rgba(255,224,102,0.5)','stroke-width':0.8,'pointer-events':'none'}));
+      g.appendChild(svgTxt(`${n} hit${n>1?'s':''}`,{x:loop.x+W-27,y:loop.y+15,
+        'text-anchor':'middle','font-family':"'DM Sans',sans-serif",'font-size':8,
+        fill:'#ffe066','pointer-events':'none'}));
+    }
+
+    // ── Mini-preview of inner graph ──
+    const previewX=loop.x+PAD, previewY=loop.y+HEADER+PAD;
+    const previewW=W-PAD*2, previewH=H-HEADER-PAD*2;
+    const nodes=loop.nodes||[], edges=loop.edges||[];
+
+    // Clip rect for preview area
+    const clipId=`lclip-${loop.id}`;
+    let clipEl=svg.querySelector(`#${clipId}`);
+    if(!clipEl){
+      const defs=svg.querySelector('defs');
+      clipEl=svgEl('clipPath',{id:clipId});
+      defs.appendChild(clipEl);
+    }
+    clipEl.innerHTML='';
+    clipEl.appendChild(svgEl('rect',{x:previewX,y:previewY,width:previewW,height:previewH,rx:4}));
+
+    const previewG=svgEl('g',{'clip-path':`url(#${clipId})`,'pointer-events':'none'});
+    g.appendChild(previewG);
+
+    // Preview background
+    previewG.appendChild(svgEl('rect',{x:previewX,y:previewY,width:previewW,height:previewH,rx:4,
+      fill:'rgba(255,200,80,0.025)'}));
+
+    if(nodes.length===0){
+      // Empty state
+      previewG.appendChild(svgTxt('empty — click to add nodes',{
+        x:previewX+previewW/2,y:previewY+previewH/2,
+        'text-anchor':'middle','dominant-baseline':'middle',
+        'font-family':"'DM Sans',sans-serif",'font-size':9,
+        fill:'rgba(255,200,80,0.3)'}));
+    } else {
+      // Compute bounds of inner nodes
+      let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+      nodes.forEach(n=>{
+        const r=nodeRadius(n)+4;
+        mnX=Math.min(mnX,n.x-r); mnY=Math.min(mnY,n.y-r);
+        mxX=Math.max(mxX,n.x+r); mxY=Math.max(mxY,n.y+r);
+      });
+      const pad=12;
+      const scX=(previewW-pad*2)/(mxX-mnX||1);
+      const scY=(previewH-pad*2)/(mxY-mnY||1);
+      const sc=Math.min(scX,scY,1); // never scale up, only down
+      const ox=previewX+pad+((previewW-pad*2)-(mxX-mnX)*sc)/2;
+      const oy=previewY+pad+((previewH-pad*2)-(mxY-mnY)*sc)/2;
+      const mp=(x,y)=>({x:ox+(x-mnX)*sc, y:oy+(y-mnY)*sc});
+
+      // Draw edges first
+      edges.forEach(edge=>{
+        const fn=nodes.find(n=>n.id===edge.from),tn=nodes.find(n=>n.id===edge.to);
+        if(!fn||!tn) return;
+        const fp=mp(fn.x,fn.y),tp=mp(tn.x,tn.y);
+        const edgeCol=edge.color||{call:'rgba(77,232,178,0.5)',return:'rgba(255,143,77,0.5)',param:'rgba(124,111,247,0.5)',cond:'rgba(247,217,111,0.5)'}[edge.type]||'rgba(77,232,178,0.5)';
+        const path=svgEl('path',{
+          d:`M${fp.x},${fp.y} L${tp.x},${tp.y}`,
+          fill:'none',stroke:edgeCol,'stroke-width':1.2,opacity:0.7
+        });
+        previewG.appendChild(path);
+      });
+
+      // Draw nodes
+      nodes.forEach(n=>{
+        const r=Math.max(4, nodeRadius(n)*sc);
+        const p=mp(n.x,n.y);
+        const col=getNodeColor(n);
+        const isLoopCond=n.id===loop.loopCondId;
+        if(n.type==='fn'){
+          // Circle
+          previewG.appendChild(svgEl('circle',{cx:p.x,cy:p.y,r:r+1,fill:'rgba(0,0,0,0.3)'}));
+          const circ=svgEl('circle',{cx:p.x,cy:p.y,r,
+            fill:col.fill,stroke:isLoopCond?'#ffc850':col.border,'stroke-width':isLoopCond?1.5:1});
+          previewG.appendChild(circ);
+          // Label if big enough
+          if(r>10){
+            const fs=Math.max(6,Math.min(9,r*0.55));
+            const lbl=svgTxt(trunc(n.name||'fn',Math.floor(r/3.5)),{
+              x:p.x,y:p.y,'text-anchor':'middle','dominant-baseline':'middle',
+              'font-family':"'DM Sans',sans-serif",'font-size':fs,fill:'rgba(255,255,255,0.75)',
+            });
+            previewG.appendChild(lbl);
+          }
+        } else {
+          // Diamond
+          const pts=`${p.x},${p.y-r} ${p.x+r},${p.y} ${p.x},${p.y+r} ${p.x-r},${p.y}`;
+          previewG.appendChild(svgEl('polygon',{points:`${p.x},${p.y-r-1} ${p.x+r+1},${p.y} ${p.x},${p.y+r+1} ${p.x-r-1},${p.y}`,fill:'rgba(0,0,0,0.3)'}));
+          previewG.appendChild(svgEl('polygon',{points:pts,
+            fill:col.fill,stroke:isLoopCond?'#ffc850':col.border,'stroke-width':isLoopCond?1.5:1}));
+          if(r>10){
+            const fs=Math.max(6,Math.min(9,r*0.5));
+            previewG.appendChild(svgTxt(trunc(n.name||'cond',Math.floor(r/3.5)),{
+              x:p.x,y:p.y,'text-anchor':'middle','dominant-baseline':'middle',
+              'font-family':"'DM Sans',sans-serif",'font-size':fs,fill:'rgba(255,255,255,0.75)',
+            }));
+          }
+        }
+        // Loop-condition gold dot
+        if(isLoopCond){
+          previewG.appendChild(svgEl('circle',{cx:p.x+r*0.7,cy:p.y-r*0.7,r:Math.max(2,r*0.28),
+            fill:'#ffc850',opacity:0.9}));
+        }
+      });
+    }
+
+    // Preview border (drawn after clip content)
+    g.appendChild(svgEl('rect',{x:previewX,y:previewY,width:previewW,height:previewH,rx:4,
+      fill:'none',stroke:'rgba(255,200,80,0.2)','stroke-width':0.8,'pointer-events':'none'}));
+
+    // Resize handle
+    const hx=loop.x+W-6,hy=loop.y+H-6;
+    const handle=svgEl('rect',{x:hx,y:hy,width:12,height:12,rx:2,
+      fill:'rgba(255,200,80,0.5)','class':'zone-handle',cursor:'nwse-resize'});
+    g.appendChild(handle);
+    handle.addEventListener('mousedown',e=>{e.stopPropagation();startLoopResize(e,loop);});
+  });
+}
+
+let loopResizeState=null, loopDragState=null;
+function startLoopResize(e,loop){
+  state.selectedZone=loop.id;
+  const sp=svgPt(e.clientX,e.clientY);
+  loopResizeState={loop,sp,ow:loop.w||200,oh:loop.h||160};
+}
+
+function attachLoopBoxEvents(g,loop){
+  g.addEventListener('mousedown',e=>{
+    if(state.tool!=='select') return;
+    if(e.target.classList.contains('zone-handle')) return;
+    e.stopPropagation(); if(e.button!==0) return;
+    state.selectedZone=loop.id;
+    state.selectedNodes.clear(); state.selectedEdge=null;
+    renderLoops(); renderNodes(); renderEdges();
+    const sp=svgPt(e.clientX,e.clientY);
+    loopDragState={loop,sp,ox:loop.x,oy:loop.y};
+  });
+  g.addEventListener('click',e=>{
+    e.stopPropagation();
+    if(loopDragState&&loopDragState._moved) return;
+    openLoopModal(loop.id);
+  });
+  g.addEventListener('dblclick',e=>{e.stopPropagation();openLoopModal(loop.id);});
+  g.addEventListener('contextmenu',e=>{
+    e.preventDefault();
+    showCtxMenu(e.clientX,e.clientY,[
+      {label:'Open Loop',action:()=>openLoopModal(loop.id)},
+      {label:'Rename Loop',action:()=>renameLoop(loop.id)},
+      {sep:true},
+      {label:'Delete Loop',danger:true,action:()=>confirmDelete(()=>{
+        state.loops=state.loops.filter(l=>l.id!==loop.id);
+        if(state.selectedZone===loop.id) state.selectedZone=null;
+        renderAndSave();
+      })},
+    ]);
+  });
+}
+
+function renameLoop(id){
+  const loop=state.loops.find(l=>l.id===id); if(!loop) return;
+  const name=prompt('Loop name:',loop.label||'loop');
+  if(name!=null){loop.label=name.trim()||'loop';renderAndSave();}
+}
+
+/* Hook loop drag/resize into existing mousemove/mouseup */
+(function patchMouseHandlers(){
+  const origMove=document.onmousemove; // not used — we use addEventListener
+  // We'll intercept via our own handler added here
+  document.addEventListener('mousemove',e=>{
+    if(loopDragState){
+      const pt=svgPt(e.clientX,e.clientY);
+      const dx=pt.x-loopDragState.sp.x,dy=pt.y-loopDragState.sp.y;
+      if(Math.sqrt(dx*dx+dy*dy)>3) loopDragState._moved=true;
+      if(loopDragState._moved){
+        loopDragState.loop.x=loopDragState.ox+dx;
+        loopDragState.loop.y=loopDragState.oy+dy;
+        renderLoops();
+      }
+    }
+    if(loopResizeState){
+      const pt=svgPt(e.clientX,e.clientY);
+      loopResizeState.loop.w=Math.max(120,loopResizeState.ow+(pt.x-loopResizeState.sp.x));
+      loopResizeState.loop.h=Math.max(80, loopResizeState.oh+(pt.y-loopResizeState.sp.y));
+      renderLoops();
+    }
+  });
+  document.addEventListener('mouseup',()=>{
+    if(loopDragState){if(loopDragState._moved) persistSave(); loopDragState=null;}
+    if(loopResizeState){persistSave(); loopResizeState=null;}
+  });
+})();
+
+/* ── Create loop on canvas ── */
+function createLoop(x,y){
+  const label=prompt('Loop name:','loop');
+  if(label===null) return; // cancelled
+  const id=uid();
+  const condId=uid();
+  const loop={
+    id, x, y, w:260, h:220, label:label.trim()||'loop',
+    nodes:[{id:condId,type:'cond',x:130,y:100,name:'loop condition',
+             params:[],returnType:'',returnExample:'',
+             branches:['continue','break'],color:'#3d3519',notes:'Controls loop iteration',sizeOverride:null}],
+    edges:[],
+    loopCondId:condId,
+  };
+  state.loops.push(loop);
+  renderAndSave();
+  openLoopModal(id);
+}
+
+/* ── Tool button ── */
+document.getElementById('btn-add-loop').addEventListener('click',()=>{
+  // Place in center of viewport
+  const r=svg.getBoundingClientRect();
+  const pt=svgPt(r.left+r.width/2, r.top+r.height/2);
+  pushHistory();
+  createLoop(pt.x-120,pt.y-100);
+});
+
+/* Hook 'L' key */
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  if(e.key.toLowerCase()==='l'&&!e.ctrlKey&&!e.metaKey){
+    const r=svg.getBoundingClientRect();
+    const pt=svgPt(r.left+r.width/2,r.top+r.height/2);
+    pushHistory();
+    createLoop(pt.x-120,pt.y-100);
+  }
+},true);
+
+/* ── Patch render() to also render loops ── */
+// render extended below
+
+/* ── Patch renderAndSave to use new render ── */
+// Already done since renderAndSave calls render()
+
+/* ── Patch persistSave/persistLoad for loops ── */
+function persistSave(){
+  try{
+    const raw=localStorage.getItem(LS_KEY);
+    const existing=raw?JSON.parse(raw):{};
+    localStorage.setItem(LS_KEY,JSON.stringify({
+      version:4,
+      nodes:state.nodes,edges:state.edges,zones:state.zones,
+      loops:state.loops,
+      nextId:state.nextId,pan:state.pan,zoom:state.zoom,
+    }));
+  }catch(e){console.warn('localStorage save failed',e);}
+}
+// Patch persistLoad to restore loops
+// persistLoad patched below
+
+/* ── Patch search to cover loop nodes ── */
+function runSearch(query){
+  state.searchMatches.clear();
+  const q=query.trim().toLowerCase();
+  if(q){
+    state.nodes.forEach(node=>{
+      if(nodeMatchesQuery(node,q)) state.searchMatches.add(node.id);
+    });
+    // Also mark loop nodes — store as "loopId:nodeId" in a parallel set
+    if(!state.loopSearchMatches) state.loopSearchMatches=new Map(); // loopId -> Set<nodeId>
+    state.loopSearchMatches.clear();
+    state.loops.forEach(loop=>{
+      const hits=new Set();
+      (loop.nodes||[]).forEach(node=>{
+        if(nodeMatchesQuery(node,q)) hits.add(node.id);
+      });
+      if(hits.size) state.loopSearchMatches.set(loop.id,hits);
+    });
+  } else {
+    state.loopSearchMatches&&state.loopSearchMatches.clear();
+  }
+  // Count total matches
+  const mainCnt=state.searchMatches.size;
+  const loopCnt=state.loopSearchMatches?[...state.loopSearchMatches.values()].reduce((s,v)=>s+v.size,0):0;
+  const cnt=mainCnt+loopCnt;
+  searchCount.textContent=q?(cnt?`${cnt} match${cnt>1?'es':''}`:' no matches'):'';
+  searchCount.style.color=q&&!cnt?'var(--danger)':'var(--text-dimmer)';
+  searchClear.style.opacity=q?'1':'0';
+  searchClear.style.pointerEvents=q?'auto':'none';
+  // Render (will highlight loop boxes if they have matches)
+  render();
+  if(mainCnt>0) panToNode([...state.searchMatches][0]);
+  else if(loopCnt>0){
+    // Pan to the loop box
+    const [loopId]=state.loopSearchMatches.keys();
+    const loop=state.loops.find(l=>l.id===loopId);
+    if(loop){
+      const r=svg.getBoundingClientRect();
+      state.pan.x=r.width/2-(loop.x+loop.w/2)*state.zoom;
+      state.pan.y=r.height/2-(loop.y+loop.h/2)*state.zoom;
+      applyTransform();
+    }
+  }
+}
+function nodeMatchesQuery(node,q){
+  return (node.name||'').toLowerCase().includes(q)||
+         (node.notes||'').toLowerCase().includes(q)||
+         node.params?.some(p=>(p.name||'').toLowerCase().includes(q)||(p.type||'').toLowerCase().includes(q))||
+         (node.returnType||'').toLowerCase().includes(q);
+}
+
+/* ── Patch renderLoops to highlight loops with search hits ── */
+const _baseRenderLoops=renderLoops;
+// Override already captured above — we'll patch inline in renderLoops at the rect stroke
+
+/* Highlight loop boxes that have search hits:
+   We patch renderLoops to add a glow when loopSearchMatches has that loop's id */
+const _rlOrig=renderLoops;
+// Already referencing loopSearchMatches inside renderLoops definition above would require
+// a re-declare. Instead, patch by overriding after definition:
+// search hit rendering handled inside renderLoops
+
+/* Override render to use patched version */
+// renderLoopsWithSearch called inside renderLoops
+
+
+/* ════════════════════════════════════════════════
+   LOOP SUB-GRAPH EDITOR
+   ════════════════════════════════════════════════ */
+
+let _activeLoopId=null;
+
+const loopModal=document.getElementById('modal-loop');
+const loopSvg=document.getElementById('loop-svg');
+const loopNodesG=document.getElementById('loop-nodes-g');
+const loopEdgesG=document.getElementById('loop-edges-g');
+const loopDragEdgeEl=document.getElementById('loop-drag-edge');
+const loopCanvasWrap=document.getElementById('loop-canvas-wrap');
+const loopZoomLabel=document.getElementById('loop-zoom-label');
+loopEdgesG.appendChild(loopDragEdgeEl);
+
+const loopView={zoom:1,pan:{x:0,y:0}};
+let loopTool='select';
+let loopSelectedNodes=new Set(), loopSelectedEdge=null;
+let loopDragNodeState=null, loopEdgeDrag=null, loopPanning=false, loopPanStart=null;
+
+function loopSvgPt(cx,cy){
+  const r=loopSvg.getBoundingClientRect();
+  return{x:(cx-r.left-loopView.pan.x)/loopView.zoom,y:(cy-r.top-loopView.pan.y)/loopView.zoom};
+}
+function applyLoopTransform(){
+  const t=`translate(${loopView.pan.x},${loopView.pan.y}) scale(${loopView.zoom})`;
+  loopNodesG.setAttribute('transform',t);
+  loopEdgesG.setAttribute('transform',t);
+  loopZoomLabel.textContent=`${Math.round(loopView.zoom*100)}%`;
+}
+function setLoopTool(t){
+  loopTool=t;
+  ['loop-btn-fn','loop-btn-cond','loop-btn-connect'].forEach(id=>{
+    document.getElementById(id)?.classList.remove('active');
+  });
+  if(t==='fn') document.getElementById('loop-btn-fn')?.classList.add('active');
+  if(t==='cond') document.getElementById('loop-btn-cond')?.classList.add('active');
+  if(t==='connect') document.getElementById('loop-btn-connect')?.classList.add('active');
+  loopCanvasWrap.style.cursor=t==='connect'?'crosshair':'default';
+}
+
+function getActiveLoop(){return state.loops.find(l=>l.id===_activeLoopId);}
+
+function openLoopModal(id){
+  _activeLoopId=id;
+  const loop=getActiveLoop(); if(!loop) return;
+  loop.nodes=loop.nodes||[];
+  loop.edges=loop.edges||[];
+  document.getElementById('loop-modal-name').textContent=loop.label||'loop';
+  loopModal.hidden=false;
+  loopSelectedNodes.clear(); loopSelectedEdge=null;
+  loopView.zoom=1; loopView.pan.x=0; loopView.pan.y=0;
+  setLoopTool('select');
+  requestAnimationFrame(()=>{
+    requestAnimationFrame(()=>{
+      applyLoopTransform();
+      renderLoopGraph();
+      loopFitAll();
+    });
+  });
+}
+
+function closeLoopModal(){
+  loopModal.hidden=true;
+  _activeLoopId=null;
+  loopNodesG.innerHTML='';
+  loopEdgesG.innerHTML='';
+  loopDragEdgeEl.setAttribute('opacity','0');
+  // re-append drag edge
+  loopEdgesG.appendChild(loopDragEdgeEl);
+  persistSave();
+  render();
+}
+document.getElementById('loop-btn-close').addEventListener('click',closeLoopModal);
+
+/* Rename from inside modal */
+document.getElementById('loop-btn-rename').addEventListener('click',()=>{
+  const loop=getActiveLoop(); if(!loop) return;
+  const name=prompt('Loop name:',loop.label||'loop');
+  if(name!=null){loop.label=name.trim()||'loop';document.getElementById('loop-modal-name').textContent=loop.label;persistSave();}
+});
+
+/* ── Loop graph render ── */
+function renderLoopGraph(){
+  const loop=getActiveLoop(); if(!loop) return;
+  renderLoopEdges(loop);
+  renderLoopNodes(loop);
+  // Update mini-preview on main canvas (deferred to avoid recursion)
+  requestAnimationFrame(()=>renderLoops());
+}
+
+function renderLoopNodes(loop){
+  const nodes=loop.nodes||[];
+  const existing=new Set([...loopNodesG.querySelectorAll('[data-lnid]')].map(e=>e.dataset.lnid));
+  const current=new Set(nodes.map(n=>n.id));
+  existing.forEach(id=>{if(!current.has(id)) loopNodesG.querySelector(`[data-lnid="${id}"]`)?.remove();});
+  const searchHits=(_activeLoopId&&state.loopSearchMatches)?state.loopSearchMatches.get(_activeLoopId)||new Set():new Set();
+  nodes.forEach(node=>{
+    let g=loopNodesG.querySelector(`[data-lnid="${node.id}"]`);
+    if(!g){g=svgEl('g',{'data-lnid':node.id,'class':'node'});loopNodesG.appendChild(g);attachLoopNodeEvents(g,node,loop);}
+    g.innerHTML='';
+    const col=getNodeColor(node),sel=loopSelectedNodes.has(node.id),hit=searchHits.has(node.id);
+    if(node.type==='fn') drawFnNode(g,node,col,sel,hit);
+    else drawCondNode(g,node,col,sel,hit);
+    drawLoopPorts(g,node);
+    // Loop-condition badge
+    if(node.id===loop.loopCondId){
+      const r=nodeRadius(node);
+      g.appendChild(svgEl('rect',{x:node.x-28,y:node.y-r-24,width:56,height:14,rx:7,
+        fill:'rgba(255,200,80,0.2)',stroke:'rgba(255,200,80,0.5)','stroke-width':0.8}));
+      g.appendChild(svgTxt('↺ condition',{x:node.x,y:node.y-r-14,'text-anchor':'middle',
+        'font-family':"'DM Sans',sans-serif",'font-size':8,fill:'#ffc850','pointer-events':'none'}));
+    }
+  });
+}
+
+function drawLoopPorts(g,node){
+  const r=nodeRadius(node);
+  [{dx:0,dy:-1},{dx:0,dy:1},{dx:-1,dy:0},{dx:1,dy:0}].forEach(p=>{
+    const px=node.x+p.dx*(r+2),py=node.y+p.dy*(r+2);
+    const pt=svgEl('circle',{cx:px,cy:py,r:4,'class':'port port-io','data-lnid':node.id});
+    g.appendChild(pt);
+    pt.addEventListener('mousedown',e=>{e.stopPropagation();startLoopEdgeDrag(node,px,py);});
+  });
+}
+
+function renderLoopEdges(loop){
+  const edges=loop.edges||[];
+  const nodes=loop.nodes||[];
+  const existing=new Set([...loopEdgesG.querySelectorAll('[data-leid]')].map(e=>e.dataset.leid));
+  const current=new Set(edges.map(e=>e.id));
+  existing.forEach(id=>{if(!current.has(id)) loopEdgesG.querySelector(`[data-leid="${id}"]`)?.remove();});
+  edges.forEach(edge=>{
+    const fn=nodes.find(n=>n.id===edge.from),tn=nodes.find(n=>n.id===edge.to);
+    if(!fn||!tn) return;
+    let g=loopEdgesG.querySelector(`[data-leid="${edge.id}"]`);
+    if(!g){g=svgEl('g',{'data-leid':edge.id});loopEdgesG.appendChild(g);attachLoopEdgeEvents(g,edge,loop);}
+    g.innerHTML='';
+    const fp=nodeBorderPoint(fn,tn.x,tn.y),tp=nodeBorderPoint(tn,fn.x,fn.y);
+    const d=edge.type==='return'?straight(fp.x,fp.y,tp.x,tp.y):curved(fp.x,fp.y,tp.x,tp.y);
+    const col=edgeStrokeColor(edge),resolvedCol=resolveColor(col);
+    const markerId=`arrowhead-${resolvedCol.replace(/[#().,\s]/g,'')}`;
+    ensureMarker(markerId,resolvedCol);
+    g.appendChild(svgEl('path',{d,fill:'none',stroke:'transparent','stroke-width':16,'class':'edge-hit'}));
+    const path=svgEl('path',{d,'class':`edge type-${edge.type}`,'marker-end':`url(#${markerId})`});
+    path.style.stroke=col;
+    if(edge.type==='return') path.setAttribute('stroke-dasharray','7 3');
+    if(loopSelectedEdge===edge.id){path.classList.add('selected');path.setAttribute('filter','url(#loop-glow)');}
+    g.appendChild(path);
+    if(edge.label){
+      const mx=(fp.x+tp.x)/2,my=(fp.y+tp.y)/2-12,lw=edge.label.length*6.5+10;
+      g.appendChild(svgEl('rect',{x:mx-lw/2,y:my-9,width:lw,height:16,rx:3,'class':'edge-label-bg'}));
+      g.appendChild(svgTxt(edge.label,{x:mx,y:my+1,'class':'edge-label'}));
+    }
+  });
+}
+
+/* ── Loop node events ── */
+function attachLoopNodeEvents(g,node,loop){
+  g.addEventListener('mousedown',e=>{
+    if(loopTool==='connect') return;
+    e.stopPropagation(); if(e.button!==0) return;
+    if(!loopSelectedNodes.has(node.id)){loopSelectedNodes.clear();loopSelectedNodes.add(node.id);loopSelectedEdge=null;}
+    const sp=loopSvgPt(e.clientX,e.clientY);
+    const starts={};
+    loopSelectedNodes.forEach(id=>{const n=(loop.nodes||[]).find(nn=>nn.id===id);if(n) starts[id]={x:n.x,y:n.y};});
+    loopDragNodeState={sp,starts,moved:false,nodeId:node.id,loop};
+    renderLoopNodes(loop);
+  });
+  g.addEventListener('dblclick',e=>{e.stopPropagation();openLoopNodeModal(node.id,loop);});
+  g.addEventListener('contextmenu',e=>{
+    e.preventDefault();
+    const items=[
+      {label:'Edit',action:()=>openLoopNodeModal(node.id,loop)},
+      {sep:true},
+    ];
+    if(node.id!==loop.loopCondId){
+      items.push({label:'Delete',danger:true,action:()=>{
+        loop.nodes=loop.nodes.filter(n=>n.id!==node.id);
+        loop.edges=(loop.edges||[]).filter(e=>e.from!==node.id&&e.to!==node.id);
+        loopSelectedNodes.delete(node.id);renderLoopGraph();persistSave();
+      }});
+    }
+    showCtxMenu(e.clientX,e.clientY,items);
+  });
+}
+
+function attachLoopEdgeEvents(g,edge,loop){
+  g.addEventListener('click',e=>{
+    e.stopPropagation();
+    loopSelectedEdge=edge.id;loopSelectedNodes.clear();
+    renderLoopEdges(loop);renderLoopNodes(loop);
+  });
+  g.addEventListener('dblclick',e=>{
+    e.stopPropagation();
+    openLoopEdgeModal(edge.id,loop);
+  });
+  g.addEventListener('contextmenu',e=>{
+    e.preventDefault();
+    showCtxMenu(e.clientX,e.clientY,[
+      {label:'Delete Edge',danger:true,action:()=>{
+        loop.edges=(loop.edges||[]).filter(ee=>ee.id!==edge.id);
+        loopSelectedEdge=null;renderLoopGraph();persistSave();
+      }},
+    ]);
+  });
+}
+
+/* ── Loop node modal (reuse main modal) ── */
+let _loopEditNodeId=null, _loopEditLoop=null, _loopIsNew=false, _loopSavedSize=null;
+function openLoopNodeModal(nodeId,loop,isNew=false){
+  _loopEditNodeId=nodeId; _loopEditLoop=loop; _loopIsNew=isNew;
+  const node=(loop.nodes||[]).find(n=>n.id===nodeId); if(!node) return;
+  _loopSavedSize=node.sizeOverride??null;
+  document.getElementById('modal-node-title').textContent=node.type==='fn'?(isNew?'New Function':'Edit Function'):(isNew?'New Conditional':'Edit Conditional');
+  document.getElementById('node-name').value=node.name||'';
+  document.getElementById('node-notes').value=node.notes||'';
+  const fnF=document.getElementById('fn-fields'),condF=document.getElementById('cond-fields');
+  if(node.type==='fn'){fnF.hidden=false;condF.hidden=true;document.getElementById('return-type').value=node.returnType||'';document.getElementById('return-example').value=node.returnExample||'';buildParamList(node.params||[]);}
+  else{fnF.hidden=true;condF.hidden=false;buildBranchList(node.branches||['if','else']);}
+  const slider=document.getElementById('node-size-slider'),sizeVal=document.getElementById('node-size-val');
+  // Compute auto radius in loop context (no parent size chain, just base)
+  slider.value=node.sizeOverride!=null?node.sizeOverride:FN_R_BASE;
+  sizeVal.textContent=node.sizeOverride!=null?String(Math.round(node.sizeOverride)):'—';
+  slider.oninput=()=>{const v=parseInt(slider.value);sizeVal.textContent=String(v);node.sizeOverride=v;renderLoopGraph();};
+  document.getElementById('node-size-reset').onclick=()=>{node.sizeOverride=null;slider.value=FN_R_BASE;sizeVal.textContent='—';renderLoopGraph();};
+  buildColorPicker('node-color-row',NODE_COLORS.map(c=>c.fill),node.color||NODE_COLORS[node.type==='fn'?0:1].fill,true);
+  // Signal we're editing a loop node
+  _editNodeId=null; // prevent main modal save from firing on main graph
+  modalNode._loopMode=true;
+  modalNode.hidden=false;
+  setTimeout(()=>document.getElementById('node-name').focus(),50);
+}
+
+/* Patch modal save to handle loop mode */
+// saveNodeModal extended below
+function saveNodeModal(){
+  if(modalNode._loopMode&&_loopEditLoop){
+    const node=(_loopEditLoop.nodes||[]).find(n=>n.id===_loopEditNodeId); if(!node){modalNode._loopMode=false;return;}
+    node.name=document.getElementById('node-name').value.trim()||(node.type==='fn'?'function':'condition');
+    node.notes=document.getElementById('node-notes').value.trim();
+    if(node.type==='fn'){
+      node.params=[...document.querySelectorAll('#params-list .param-row')].map(r=>({name:r.querySelector('.pn').value.trim(),type:r.querySelector('.pt').value.trim(),example:r.querySelector('.pe').value.trim()})).filter(p=>p.name||p.type);
+      node.returnType=document.getElementById('return-type').value.trim();
+      node.returnExample=document.getElementById('return-example').value.trim();
+    } else {
+      node.branches=[...document.querySelectorAll('#branches-list .branch-name')].map(i=>i.value.trim()).filter(Boolean);
+    }
+    const sv=document.getElementById('node-size-val');
+    node.sizeOverride=sv.textContent==='—'?null:parseInt(document.getElementById('node-size-slider').value);
+    node.color=getPickedColor('node-color-row');
+    modalNode._loopMode=false;_loopEditNodeId=null;
+    modalNode.hidden=true;
+    renderLoopGraph();persistSave();showStatus('Saved');
+    return;
+  }
+  modalNode._loopMode=false;
+  // fall through to original save logic below
+  const nodeLocal=state.nodes.find(n=>n.id===_editNodeId);if(!nodeLocal) return;
+  nodeLocal.name=document.getElementById('node-name').value.trim()||(nodeLocal.type==='fn'?'function':'condition');
+  nodeLocal.notes=document.getElementById('node-notes').value.trim();
+  if(nodeLocal.type==='fn'){nodeLocal.params=[...document.querySelectorAll('#params-list .param-row')].map(r=>({name:r.querySelector('.pn').value.trim(),type:r.querySelector('.pt').value.trim(),example:r.querySelector('.pe').value.trim()})).filter(p=>p.name||p.type);nodeLocal.returnType=document.getElementById('return-type').value.trim();nodeLocal.returnExample=document.getElementById('return-example').value.trim();if(nodeLocal.returnType) autoReturnEdge(nodeLocal);}
+  else{nodeLocal.branches=[...document.querySelectorAll('#branches-list .branch-name')].map(i=>i.value.trim()).filter(Boolean);}
+  const svLocal=document.getElementById('node-size-val');
+  nodeLocal.sizeOverride=svLocal.textContent==='—'?null:parseInt(document.getElementById('node-size-slider').value);
+  nodeLocal.color=getPickedColor('node-color-row');
+  modalNode.hidden=true;renderAndSave();
+  if(_infoPanelNodeId===_editNodeId) showInfoPanel(_editNodeId);
+  showStatus('Saved');
+}
+
+// cancelNodeModal extended below
+function cancelNodeModal(){
+  if(modalNode._loopMode){
+    if(_loopIsNew&&_loopEditLoop){
+      _loopEditLoop.nodes=(_loopEditLoop.nodes||[]).filter(n=>n.id!==_loopEditNodeId);
+      _loopEditLoop.edges=(_loopEditLoop.edges||[]).filter(e=>e.from!==_loopEditNodeId&&e.to!==_loopEditNodeId);
+    } else if(_loopEditLoop){
+      const nd=(_loopEditLoop.nodes||[]).find(n=>n.id===_loopEditNodeId);
+      if(nd) nd.sizeOverride=_loopSavedSize;
+    }
+    modalNode._loopMode=false;_loopEditNodeId=null;
+    modalNode.hidden=true;
+    renderLoopGraph();
+    return;
+  }
+  modalNode._loopMode=false;
+  // original cancel logic
+  if(_isNew){deleteNode(_editNodeId);}
+  else{const ndCancel=state.nodes.find(n=>n.id===_editNodeId);if(ndCancel){ndCancel.sizeOverride=_savedSize;render();}}
+  modalNode.hidden=true;
+}
+
+/* ── Loop edge modal ── */
+let _loopEditEdgeId=null, _loopEditEdgeLoop=null;
+function openLoopEdgeModal(edgeId,loop){
+  _loopEditEdgeId=edgeId; _loopEditEdgeLoop=loop;
+  const edge=(loop.edges||[]).find(e=>e.id===edgeId); if(!edge) return;
+  document.querySelectorAll('#edge-type-group input').forEach(r=>{r.checked=r.value===edge.type;});
+  document.getElementById('edge-dtype').value=edge.dtype||'';
+  document.getElementById('edge-example').value=edge.example||'';
+  document.getElementById('edge-label').value=edge.label||'';
+  buildColorPicker('edge-color-row',EDGE_COLORS,edge.color||'',false);
+  modalEdge._loopMode=true;
+  modalEdge.hidden=false;
+}
+
+/* Patch edge modal save */
+const _origEdgeSave=document.getElementById('modal-edge-save').onclick;
+document.getElementById('modal-edge-save').addEventListener('click',(ev)=>{
+  if(modalEdge._loopMode&&_loopEditEdgeLoop){
+    ev.stopImmediatePropagation();
+    const edge=(_loopEditEdgeLoop.edges||[]).find(e=>e.id===_loopEditEdgeId); if(!edge){modalEdge._loopMode=false;return;}
+    edge.type=document.querySelector('#edge-type-group input:checked')?.value||'call';
+    edge.dtype=document.getElementById('edge-dtype').value.trim();
+    edge.example=document.getElementById('edge-example').value.trim();
+    edge.label=document.getElementById('edge-label').value.trim();
+    edge.color=getPickedColor('edge-color-row');
+    modalEdge._loopMode=false;_loopEditEdgeId=null;
+    modalEdge.hidden=true;renderLoopGraph();persistSave();
+  }
+},true); // capture=true, stopImmediatePropagation prevents main handler
+
+document.getElementById('modal-edge-delete').addEventListener('click',(ev)=>{
+  if(modalEdge._loopMode&&_loopEditEdgeLoop){
+    ev.stopImmediatePropagation();
+    _loopEditEdgeLoop.edges=(_loopEditEdgeLoop.edges||[]).filter(e=>e.id!==_loopEditEdgeId);
+    modalEdge._loopMode=false;_loopEditEdgeId=null;
+    modalEdge.hidden=true;renderLoopGraph();persistSave();
+  }
+},true);
+
+document.getElementById('modal-edge-cancel').addEventListener('click',()=>{modalEdge._loopMode=false;},true);
+document.getElementById('modal-edge-close').addEventListener('click', ()=>{modalEdge._loopMode=false;},true);
+
+/* ── Loop canvas interactions ── */
+loopCanvasWrap.addEventListener('mousedown',e=>{
+  if(e.button===1||(e.button===0&&e.altKey)){
+    loopPanning=true;
+    loopPanStart={x:e.clientX-loopView.pan.x,y:e.clientY-loopView.pan.y};
+    return;
+  }
+  const loop=getActiveLoop(); if(!loop) return;
+  if(loopTool==='fn'||loopTool==='cond'){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    const node={id:uid(),type:loopTool,x:pt.x,y:pt.y,name:'',params:[],returnType:'',returnExample:'',branches:['if','else'],color:'',notes:'',sizeOverride:null};
+    loop.nodes=loop.nodes||[];
+    loop.nodes.push(node);
+    renderLoopGraph();
+    openLoopNodeModal(node.id,loop,true);
+    setLoopTool('select');
+  }
+});
+
+document.addEventListener('mousemove',e=>{
+  if(loopPanning&&!loopModal.hidden){
+    loopView.pan.x=e.clientX-loopPanStart.x;
+    loopView.pan.y=e.clientY-loopPanStart.y;
+    applyLoopTransform();
+    return;
+  }
+  if(loopDragNodeState){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    const dx=pt.x-loopDragNodeState.sp.x,dy=pt.y-loopDragNodeState.sp.y;
+    if(Math.sqrt(dx*dx+dy*dy)>3) loopDragNodeState.moved=true;
+    if(loopDragNodeState.moved){
+      const loop=loopDragNodeState.loop;
+      loopSelectedNodes.forEach(id=>{
+        const n=(loop.nodes||[]).find(nn=>nn.id===id);
+        if(n&&loopDragNodeState.starts[id]){n.x=loopDragNodeState.starts[id].x+dx;n.y=loopDragNodeState.starts[id].y+dy;}
+      });
+      renderLoopGraph();
+    }
+  }
+  if(loopEdgeDrag&&!loopModal.hidden){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    loopDragEdgeEl.setAttribute('d',curved(loopEdgeDrag.px,loopEdgeDrag.py,pt.x,pt.y));
+  }
+});
+
+document.addEventListener('mouseup',e=>{
+  if(loopPanning){loopPanning=false;}
+  if(loopDragNodeState){if(loopDragNodeState.moved) persistSave(); loopDragNodeState=null;}
+  if(loopEdgeDrag&&!loopModal.hidden){
+    const loop=getActiveLoop();
+    if(loop){
+      const pt=loopSvgPt(e.clientX,e.clientY);
+      const target=(loop.nodes||[]).find(n=>{
+        if(n.id===loopEdgeDrag.fromNode.id) return false;
+        const dx=n.x-pt.x,dy=n.y-pt.y;
+        return Math.sqrt(dx*dx+dy*dy)<nodeRadius(n)+10;
+      });
+      if(target){
+        const autoType=inferEdgeType(loopEdgeDrag.fromNode,target);
+        const edge={id:uid(),from:loopEdgeDrag.fromNode.id,to:target.id,type:autoType,dtype:'',example:'',label:'',color:''};
+        loop.edges=loop.edges||[];
+        loop.edges.push(edge);
+        renderLoopGraph();persistSave();
+        openLoopEdgeModal(edge.id,loop);
+      }
+    }
+    loopDragEdgeEl.setAttribute('opacity','0');loopEdgeDrag=null;
+  }
+});
+
+function startLoopEdgeDrag(fromNode,px,py){
+  setLoopTool('connect');
+  loopEdgeDrag={fromNode,px,py};
+  loopDragEdgeEl.setAttribute('opacity','1');
+  loopDragEdgeEl.setAttribute('d',`M${px},${py} L${px},${py}`);
+}
+
+/* ── Loop zoom ── */
+loopCanvasWrap.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=loopSvg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  const f=e.deltaY<0?1.1:0.9,nz=Math.max(0.15,Math.min(3,loopView.zoom*f));
+  loopView.pan.x=mx-(mx-loopView.pan.x)*(nz/loopView.zoom);
+  loopView.pan.y=my-(my-loopView.pan.y)*(nz/loopView.zoom);
+  loopView.zoom=nz;applyLoopTransform();
+},{passive:false});
+document.getElementById('loop-btn-zoom-in').addEventListener('click',()=>{loopView.zoom=Math.min(3,loopView.zoom*1.2);applyLoopTransform();});
+document.getElementById('loop-btn-zoom-out').addEventListener('click',()=>{loopView.zoom=Math.max(0.15,loopView.zoom*0.8);applyLoopTransform();});
+document.getElementById('loop-btn-fit').addEventListener('click',loopFitAll);
+document.getElementById('loop-btn-fn').addEventListener('click',()=>setLoopTool('fn'));
+document.getElementById('loop-btn-cond').addEventListener('click',()=>setLoopTool('cond'));
+document.getElementById('loop-btn-connect').addEventListener('click',()=>setLoopTool('connect'));
+
+function loopFitAll(){
+  const loop=getActiveLoop(); if(!loop||!(loop.nodes||[]).length) return;
+  const r=loopSvg.getBoundingClientRect(),pad=80;
+  let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+  loop.nodes.forEach(n=>{const rr=nodeRadius(n);mnX=Math.min(mnX,n.x-rr);mnY=Math.min(mnY,n.y-rr);mxX=Math.max(mxX,n.x+rr);mxY=Math.max(mxY,n.y+rr);});
+  const w=mxX-mnX+pad*2,h=mxY-mnY+pad*2;
+  loopView.zoom=Math.max(0.15,Math.min(2.5,Math.min(r.width/w,r.height/h)));
+  loopView.pan.x=(r.width-w*loopView.zoom)/2-(mnX-pad)*loopView.zoom;
+  loopView.pan.y=(r.height-h*loopView.zoom)/2-(mnY-pad)*loopView.zoom;
+  applyLoopTransform();
+}
+
+/* ── Loop keyboard shortcuts (active when modal open) ── */
+document.addEventListener('keydown',e=>{
+  if(loopModal.hidden) return;
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  const k=e.key.toLowerCase();
+  if(k==='f') setLoopTool('fn');
+  if(k==='c') setLoopTool('cond');
+  if(k==='e') setLoopTool('connect');
+  if(k==='v') setLoopTool('select');
+  if(k==='escape'){closeLoopModal();}
+  if(k==='delete'||k==='backspace'){
+    const loop=getActiveLoop(); if(!loop) return;
+    if(loopSelectedEdge){loop.edges=(loop.edges||[]).filter(ee=>ee.id!==loopSelectedEdge);loopSelectedEdge=null;renderLoopGraph();persistSave();}
+    loopSelectedNodes.forEach(id=>{
+      if(id===loop.loopCondId) return; // can't delete loop condition
+      loop.nodes=(loop.nodes||[]).filter(n=>n.id!==id);
+      loop.edges=(loop.edges||[]).filter(e=>e.from!==id&&e.to!==id);
+    });
+    loopSelectedNodes.clear();renderLoopGraph();persistSave();
+  }
+});
+
+/* ── Patch persistLoad to restore loops ── */
+// After load we ensure loops array exists and loopCondIds are valid
+const _origPersistLoadFn=persistLoad;
+persistLoad=function(){
+  const ok=_origPersistLoadFn();
+  if(ok){
+    const raw=localStorage.getItem(LS_KEY);
+    if(raw){
+      try{const d=JSON.parse(raw);state.loops=d.loops||[];}
+      catch{}
+    }
+  }
+  return ok;
+};
+
+/* ── Patch saveFile / loadFile for loops ── */
+const _origSaveFile=saveFile;
+saveFile=function(){
+  const data=JSON.stringify({version:4,nodes:state.nodes,edges:state.edges,zones:state.zones,loops:state.loops,nextId:state.nextId,pan:state.pan,zoom:state.zoom},null,2);
+  const blob=new Blob([data],{type:'application/json'}),url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='diagram.seestack.json';a.click();URL.revokeObjectURL(url);
+  showStatus('Saved');
+};
+
+// Patch file load listener to restore loops
+document.getElementById('file-load-input').addEventListener('change',e=>{
+  // Additional restoration after the existing handler runs
+  // We hook into the reader onload via event — easier to just patch persistLoad
+  // The existing handler already calls persistLoad indirectly; loops are loaded there
+},true);
+
+/* ── Make sure loops survive the initial load ── */
+// Override the post-init to patch loops
+(function ensureLoopsOnLoad(){
+  const raw=localStorage.getItem(LS_KEY);
+  if(raw){try{const d=JSON.parse(raw);if(d.loops) state.loops=d.loops;}catch{}}
+  else{state.loops=[];}
+})();
+
+// Patch file-load-input change to include loops
+(function patchFileLoad(){
+  const inp=document.getElementById('file-load-input');
+  const listeners=inp.onchange; // existing registered via addEventListener
+  inp.addEventListener('change',e=>{
+    // fires after existing handler which sets state
+    setTimeout(()=>{
+      const raw=localStorage.getItem(LS_KEY);
+      if(raw){try{const d=JSON.parse(raw);state.loops=d.loops||[];}catch{}}
+      render();
+    },50);
+  });
+})();
+
