@@ -249,6 +249,10 @@
         <span id="loop-modal-name" class="loop-modal-name">loop</span>
       </div>
       <div class="loop-modal-actions">
+        <button class="tool-btn active" id="loop-btn-select" title="Select (V)">
+          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M3 2L13 8L8 9.5L6 14L3 2Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>
+          <span>Select</span>
+        </button>
         <button class="tool-btn" id="loop-btn-fn" title="Add Function (F)">
           <svg width="13" height="13" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5.5 8H10.5M8 5.5V10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
           <span>Function</span>
@@ -256,6 +260,14 @@
         <button class="tool-btn" id="loop-btn-cond" title="Add Conditional">
           <svg width="13" height="13" viewBox="0 0 16 16"><path d="M8 2L14 8L8 14L2 8Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M8 5.5V10.5M5.5 8H10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
           <span>Conditional</span>
+        </button>
+        <button class="tool-btn" id="loop-btn-zone" title="Add Zone (Z)">
+          <svg width="13" height="13" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.4" fill="none" stroke-dasharray="3 2"/><path d="M4 5H12M4 8H9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <span>Zone</span>
+        </button>
+        <button class="tool-btn" id="loop-btn-loop" title="Add Loop (L)">
+          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M2 8C2 5 4.5 3 8 3C11 3 13.5 5 13.5 8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/><path d="M11 6L13.5 8L11 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="10" width="10" height="4" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none" stroke-dasharray="2.5 1.5"/></svg>
+          <span>Loop</span>
         </button>
         <button class="tool-btn" id="loop-btn-connect" title="Connect (E)">
           <svg width="13" height="13" viewBox="0 0 16 16"><circle cx="3" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="13" cy="8" r="2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M5 8H11M9.5 6L11 8L9.5 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -271,7 +283,15 @@
         <button class="btn-primary" id="loop-btn-close" style="padding:5px 14px;font-size:12px">&#8592; Close Loop</button>
       </div>
     </div>
-    <div class="loop-canvas-wrap" id="loop-canvas-wrap">
+    <div id="loop-breadcrumb" class="loop-breadcrumb"></div>
+    <div class="loop-canvas-wrap" id="loop-canvas-wrap" style="position:relative">
+      <aside id="loop-info-panel" class="info-panel info-panel--hidden loop-info-panel">
+        <div class="info-panel-header">
+          <span id="loop-info-panel-title" class="info-panel-title">Node Info</span>
+          <button id="loop-info-panel-close" class="info-panel-close">✕</button>
+        </div>
+        <div id="loop-info-panel-body" class="info-panel-body"></div>
+      </aside>
       <svg id="loop-svg" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block">
         <defs>
           <marker id="loop-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
@@ -286,11 +306,12 @@
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#loop-grid-pat)"/>
+        <g id="loop-zones-g"></g>
         <g id="loop-edges-g"></g>
         <g id="loop-nodes-g"></g>
         <path id="loop-drag-edge" fill="none" stroke="var(--loop-accent)" stroke-width="1.5" stroke-dasharray="6 3" opacity="0"/>
       </svg>
-      <div class="loop-help-bar"><kbd>F</kbd> Fn &nbsp;&#183;&nbsp; <kbd>C</kbd> Cond &nbsp;&#183;&nbsp; <kbd>E</kbd> Connect &nbsp;&#183;&nbsp; <kbd>Del</kbd> Delete &nbsp;&#183;&nbsp; <kbd>Scroll</kbd> Zoom &nbsp;&#183;&nbsp; <kbd>Alt+Drag</kbd> Pan &nbsp;&#183;&nbsp; Dblclick=edit</div>
+      <div class="loop-help-bar"><kbd>V</kbd> Select &nbsp;&#183;&nbsp; <kbd>F</kbd> Fn &nbsp;&#183;&nbsp; <kbd>C</kbd> Cond &nbsp;&#183;&nbsp; <kbd>Z</kbd> Zone &nbsp;&#183;&nbsp; <kbd>L</kbd> Loop &nbsp;&#183;&nbsp; <kbd>E</kbd> Connect &nbsp;&#183;&nbsp; <kbd>Del</kbd> Delete &nbsp;&#183;&nbsp; <kbd>Scroll</kbd> Zoom &nbsp;&#183;&nbsp; <kbd>Alt+Drag</kbd> Pan &nbsp;&#183;&nbsp; Dblclick=edit</div>
     </div>
   </div>
 </div>

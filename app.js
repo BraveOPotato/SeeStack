@@ -282,14 +282,23 @@ function buildZoneColorPicker(cid,currentFill,currentBorder){
   });
 }
 document.getElementById('modal-zone-save').addEventListener('click',()=>{
+  if(modalZone._loopZone){
+    const zone=modalZone._loopZone,loop=modalZone._loopZoneLoop;
+    zone.label=document.getElementById('zone-label-input').value.trim();
+    const cr=document.getElementById('zone-color-row');
+    zone.fill=cr.dataset.fill;zone.border=cr.dataset.border;
+    modalZone._loopZone=null;modalZone._loopZoneLoop=null;
+    modalZone.hidden=true;renderLoopGraph();persistSave();showStatus('Zone saved');
+    return;
+  }
   const zone=state.zones.find(z=>z.id===_editZoneId);if(!zone) return;
   zone.label=document.getElementById('zone-label-input').value.trim();
   const cr=document.getElementById('zone-color-row');
   zone.fill=cr.dataset.fill;zone.border=cr.dataset.border;
   modalZone.hidden=true;renderAndSave();showStatus('Zone saved');
 });
-document.getElementById('modal-zone-cancel').addEventListener('click',()=>{modalZone.hidden=true;});
-document.getElementById('modal-zone-close').addEventListener('click',  ()=>{modalZone.hidden=true;});
+document.getElementById('modal-zone-cancel').addEventListener('click',()=>{modalZone._loopZone=null;modalZone._loopZoneLoop=null;modalZone.hidden=true;});
+document.getElementById('modal-zone-close').addEventListener('click',  ()=>{modalZone._loopZone=null;modalZone._loopZoneLoop=null;modalZone.hidden=true;});
 
 /* ── Nodes ── */
 function renderNodes(){
@@ -393,6 +402,19 @@ function ensureMarker(id,color){
   m.appendChild(svgEl('path',{d:'M0,0 L0,6 L8,3 z',fill:color}));
   defs.appendChild(m);
 }
+function loopEnsureMarker(id,color){
+  // Write markers into loop SVG defs so they resolve correctly inside loop-svg
+  const loopDefs=loopSvg?loopSvg.querySelector('defs'):null;
+  if(loopDefs){
+    if(!loopDefs.querySelector(`#${id}`)){
+      const m=svgEl('marker',{id,markerWidth:8,markerHeight:8,refX:6,refY:3,orient:'auto'});
+      m.appendChild(svgEl('path',{d:'M0,0 L0,6 L8,3 z',fill:color}));
+      loopDefs.appendChild(m);
+    }
+  } else {
+    ensureMarker(id,color);
+  }
+}
 
 function renderEdges(){
   const existing=new Set([...edgesGroup.querySelectorAll('[data-eid]')].map(e=>e.dataset.eid));
@@ -400,13 +422,39 @@ function renderEdges(){
   existing.forEach(id=>{if(!current.has(id)) edgesGroup.querySelector(`[data-eid="${id}"]`)?.remove();});
   const focus=state.focusNodeId?computeFocusSet(state.focusNodeId):null;
   state.edges.forEach(edge=>{
-    const fn=state.nodes.find(n=>n.id===edge.from),tn=state.nodes.find(n=>n.id===edge.to);
+    const fn=state.nodes.find(n=>n.id===edge.from);
+    let tn=state.nodes.find(n=>n.id===edge.to);
+    // Compute border points — handle loop targets specially (rect shape)
+    let fpFn=null, tpFn=null;
+    let loopTarget=null;
+    if(!tn){
+      loopTarget=state.loops.find(l=>l.id===edge.to);
+      if(loopTarget){
+        const W=loopTarget.w||240,H=loopTarget.h||200;
+        const cx=loopTarget.x+W/2, cy=loopTarget.y+H/2;
+        // fake node just for fp computation
+        tn={id:loopTarget.id,type:'fn',x:cx,y:cy,sizeOverride:0};
+      }
+    }
     if(!fn||!tn) return;
+
+    let fp,tp;
+    if(loopTarget){
+      // fp = border of from-node toward loop center
+      fp=nodeBorderPoint(fn,tn.x,tn.y);
+      // tp = intersection of line (fn.x,fn.y)->(cx,cy) with loop rect border
+      const W=loopTarget.w||240,H=loopTarget.h||200;
+      const lx=loopTarget.x,ly=loopTarget.y;
+      const cx=lx+W/2,cy=ly+H/2;
+      tp=rectBorderPoint(lx,ly,W,H,fn.x,fn.y);
+    } else {
+      fp=nodeBorderPoint(fn,tn.x,tn.y);
+      tp=nodeBorderPoint(tn,fn.x,fn.y);
+    }
+
     let g=edgesGroup.querySelector(`[data-eid="${edge.id}"]`);
     if(!g){g=svgEl('g',{'data-eid':edge.id});edgesGroup.appendChild(g);attachEdgeEvents(g,edge);}
     g.innerHTML='';
-    const fp=nodeBorderPoint(fn,tn.x,tn.y),tp=nodeBorderPoint(tn,fn.x,fn.y);
-    // Return = straight, everything else = curved
     const d=edge.type==='return'?straight(fp.x,fp.y,tp.x,tp.y):curved(fp.x,fp.y,tp.x,tp.y);
     const col=edgeStrokeColor(edge),resolvedCol=resolveColor(col);
     const markerId=`arrowhead-${resolvedCol.replace(/[#().,\s]/g,'')}`;
@@ -426,6 +474,17 @@ function renderEdges(){
   });
 }
 
+// Returns point on rect border closest to (fromX,fromY) from rect center
+function rectBorderPoint(rx,ry,rw,rh,fromX,fromY){
+  const cx=rx+rw/2,cy=ry+rh/2;
+  const dx=fromX-cx,dy=fromY-cy;
+  if(dx===0&&dy===0) return{x:cx,y:ry};
+  const scaleX=dx!==0?(rw/2)/Math.abs(dx):Infinity;
+  const scaleY=dy!==0?(rh/2)/Math.abs(dy):Infinity;
+  const scale=Math.min(scaleX,scaleY);
+  return{x:cx+dx*scale,y:cy+dy*scale};
+}
+
 /* ── Node events ── */
 let dragState=null;
 function attachNodeEvents(g,node){
@@ -437,6 +496,7 @@ function attachNodeEvents(g,node){
     const sp=svgPt(e.clientX,e.clientY),starts={};
     state.selectedNodes.forEach(id=>{const n=state.nodes.find(nn=>nn.id===id);if(n) starts[id]={x:n.x,y:n.y};});
     dragState={type:'node',sp,starts,moved:false,nodeId:node.id};
+    document.body.style.userSelect='none';
     renderNodes();renderEdges();
   });
   g.addEventListener('mouseup',e=>{
@@ -456,13 +516,22 @@ function attachNodeEvents(g,node){
 }
 
 /* ── Info Panel ── */
-function showInfoPanel(nodeId){
-  const node=state.nodes.find(n=>n.id===nodeId);if(!node) return;
-  _infoPanelNodeId=nodeId;
-  state.focusNodeId=nodeId;
-  render();
-  infoPanelTitle.textContent=node.type==='fn'?'Function':'Conditional';
-  infoPanel.classList.remove('info-panel--hidden');
+function showInfoPanel(nodeId,loop){
+  // When loop context: render into the loop info panel; otherwise use main info panel
+  const isLoopCtx=!!loop;
+  let node=isLoopCtx?(loop.nodes||[]).find(n=>n.id===nodeId):null;
+  if(!node) node=state.nodes.find(n=>n.id===nodeId);
+  if(!node) return;
+
+  // Choose which panel to populate
+  const panel     = isLoopCtx ? loopInfoPanel      : infoPanel;
+  const panelBody = isLoopCtx ? loopInfoPanelBody  : infoPanelBody;
+  const panelTitle= isLoopCtx ? loopInfoPanelTitle : infoPanelTitle;
+
+  if(!isLoopCtx){_infoPanelNodeId=nodeId;state.focusNodeId=nodeId;render();}
+
+  panelTitle.textContent=node.type==='fn'?'Function':'Conditional';
+  panel.classList.remove('info-panel--hidden');
   const R=Math.round(nodeRadius(node)),isOv=node.sizeOverride!=null;
   const typeIcon=node.type==='fn'
     ?`<svg width="11" height="11" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>`
@@ -484,15 +553,17 @@ function showInfoPanel(nodeId){
   }else{
     if(node.branches?.length>0){h+=`<div class="ip-section"><div class="ip-label">Branches <span class="ip-badge cond">${node.branches.length}</span></div><ul class="ip-param-list">`;node.branches.forEach(b=>{h+=`<li class="ip-param-item"><div class="ip-param-name">${esc(b||'(unnamed)')}</div></li>`;});h+=`</ul></div>`;}
   }
-  const callers=state.edges.filter(e=>e.to===node.id&&e.type==='call').map(e=>state.nodes.find(n=>n.id===e.from)).filter(Boolean);
-  const callees=state.edges.filter(e=>e.from===node.id&&e.type==='call').map(e=>state.nodes.find(n=>n.id===e.to)).filter(Boolean);
+  const edgeSrc=loop?(loop.edges||[]):state.edges;
+  const nodeSrc=loop?(loop.nodes||[]):state.nodes;
+  const callers=edgeSrc.filter(e=>e.to===node.id&&e.type==='call').map(e=>nodeSrc.find(n=>n.id===e.from)).filter(Boolean);
+  const callees=edgeSrc.filter(e=>e.from===node.id&&e.type==='call').map(e=>nodeSrc.find(n=>n.id===e.to)).filter(Boolean);
   if(callers.length){h+=`<div class="ip-section"><div class="ip-label">Called by</div>`;callers.forEach(n=>{h+=`<div class="ip-value ip-nav-link" data-goto="${n.id}" style="font-size:11px">← ${esc(n.name||n.id)}</div>`;});h+=`</div>`;}
   if(callees.length){h+=`<div class="ip-section"><div class="ip-label">Calls</div>`;callees.forEach(n=>{h+=`<div class="ip-value ip-nav-link" data-goto="${n.id}" style="font-size:11px">→ ${esc(n.name||n.id)}</div>`;});h+=`</div>`;}
   if(node.notes){h+=`<div class="ip-divider"></div><div class="ip-section"><div class="ip-label">Notes</div><div class="ip-notes">${esc(node.notes)}</div></div>`;}
-  h+=`<div class="ip-edit-btn"><button id="ip-edit-btn">✎&nbsp; Edit Node</button></div>`;
-  infoPanelBody.innerHTML=h;
-  infoPanelBody.querySelectorAll('.ip-nav-link[data-goto]').forEach(el=>{el.style.cursor='pointer';el.style.textDecoration='underline';el.addEventListener('click',()=>showInfoPanel(el.dataset.goto));});
-  document.getElementById('ip-edit-btn')?.addEventListener('click',()=>openNodeModal(nodeId));
+  h+=`<div class="ip-edit-btn"><button id="${isLoopCtx?'loop-':''}ip-edit-btn">✎&nbsp; Edit Node</button></div>`;
+  panelBody.innerHTML=h;
+  panelBody.querySelectorAll('.ip-nav-link[data-goto]').forEach(el=>{el.style.cursor='pointer';el.style.textDecoration='underline';el.addEventListener('click',()=>showInfoPanel(el.dataset.goto,loop));});
+  panelBody.querySelector(`#${isLoopCtx?'loop-':''}ip-edit-btn`)?.addEventListener('click',()=>loop?openLoopNodeModal(nodeId,loop):openNodeModal(nodeId));
 }
 function hideInfoPanel(){infoPanel.classList.add('info-panel--hidden');_infoPanelNodeId=null;state.focusNodeId=null;render();}
 document.getElementById('info-panel-close').addEventListener('click',hideInfoPanel);
@@ -647,7 +718,7 @@ document.addEventListener('mousemove',e=>{
 
 document.addEventListener('mouseup',e=>{
   if(panning){panning=false;canvasWrap.classList.remove('tool-pan');}
-  if(dragState){if(dragState.moved) persistSave();dragState=null;}
+  if(dragState){if(dragState.moved) persistSave();dragState=null;document.body.style.userSelect='';}
   if(zoneDragState){persistSave();zoneDragState=null;}
   if(zoneResizeState){persistSave();zoneResizeState=null;}
   if(zoneDraw){
@@ -658,12 +729,23 @@ document.addEventListener('mouseup',e=>{
   }
   if(edgeDrag){
     const pt=svgPt(e.clientX,e.clientY);
-    const target=state.nodes.find(n=>{if(n.id===edgeDrag.fromNode.id) return false;const dx=n.x-pt.x,dy=n.y-pt.y;return Math.sqrt(dx*dx+dy*dy)<nodeRadius(n)+10;});
-    if(target){
-      // Auto-infer edge type
-      const autoType=inferEdgeType(edgeDrag.fromNode,target);
-      const edge={id:uid(),from:edgeDrag.fromNode.id,to:target.id,type:autoType,dtype:'',example:'',label:'',color:''};
+    // Check if dropping onto a loop node (loop box on main canvas)
+    const targetLoop=state.loops.find(l=>{
+      const W=l.w||200,H=l.h||160;
+      return pt.x>=l.x&&pt.x<=l.x+W&&pt.y>=l.y&&pt.y<=l.y+H;
+    });
+    if(targetLoop){
+      // Edge to loop → always cond type
+      const edge={id:uid(),from:edgeDrag.fromNode.id,to:targetLoop.id,type:'cond',dtype:'',example:'',label:'',color:''};
       state.edges.push(edge);renderAndSave();openEdgeModal(edge.id);
+    } else {
+      const target=state.nodes.find(n=>{if(n.id===edgeDrag.fromNode.id) return false;const dx=n.x-pt.x,dy=n.y-pt.y;return Math.sqrt(dx*dx+dy*dy)<nodeRadius(n)+10;});
+      if(target){
+        // Auto-infer edge type
+        const autoType=inferEdgeType(edgeDrag.fromNode,target);
+        const edge={id:uid(),from:edgeDrag.fromNode.id,to:target.id,type:autoType,dtype:'',example:'',label:'',color:''};
+        state.edges.push(edge);renderAndSave();openEdgeModal(edge.id);
+      }
     }
     dragEdge.setAttribute('opacity','0');edgeDrag=null;
   }
@@ -1400,6 +1482,7 @@ const _rlOrig=renderLoops;
    ════════════════════════════════════════════════ */
 
 let _activeLoopId=null;
+let _loopStack=[]; // stack of {loop, parentLoop} for breadcrumb navigation
 
 const loopModal=document.getElementById('modal-loop');
 const loopSvg=document.getElementById('loop-svg');
@@ -1408,12 +1491,93 @@ const loopEdgesG=document.getElementById('loop-edges-g');
 const loopDragEdgeEl=document.getElementById('loop-drag-edge');
 const loopCanvasWrap=document.getElementById('loop-canvas-wrap');
 const loopZoomLabel=document.getElementById('loop-zoom-label');
+const loopInfoPanel=document.getElementById('loop-info-panel');
+const loopInfoPanelBody=document.getElementById('loop-info-panel-body');
+const loopInfoPanelTitle=document.getElementById('loop-info-panel-title');
+const loopBreadcrumb=document.getElementById('loop-breadcrumb');
+document.getElementById('loop-info-panel-close').addEventListener('click',()=>{
+  loopInfoPanel.classList.add('info-panel--hidden');
+});
 loopEdgesG.appendChild(loopDragEdgeEl);
 
 const loopView={zoom:1,pan:{x:0,y:0}};
 let loopTool='select';
 let loopSelectedNodes=new Set(), loopSelectedEdge=null;
 let loopDragNodeState=null, loopEdgeDrag=null, loopPanning=false, loopPanStart=null;
+let loopZoneDraw=null, loopZoneDragState=null, loopZoneResizeState=null;
+
+const loopZonesG=document.getElementById('loop-zones-g');
+function applyLoopTransformFull(){
+  const t=`translate(${loopView.pan.x},${loopView.pan.y}) scale(${loopView.zoom})`;
+  loopZonesG.setAttribute('transform',t);
+  loopNodesG.setAttribute('transform',t);
+  loopEdgesG.setAttribute('transform',t);
+  loopZoomLabel.textContent=`${Math.round(loopView.zoom*100)}%`;
+}
+
+function renderLoopZones(loop){
+  loop.zones=loop.zones||[];
+  const existing=new Set([...loopZonesG.querySelectorAll('[data-lzid]')].map(e=>e.dataset.lzid));
+  const current=new Set(loop.zones.map(z=>z.id));
+  existing.forEach(id=>{if(!current.has(id)) loopZonesG.querySelector(`[data-lzid="${id}"]`)?.remove();});
+  loop.zones.forEach(zone=>{
+    let g=loopZonesG.querySelector(`[data-lzid="${zone.id}"]`);
+    if(!g){g=svgEl('g',{'data-lzid':zone.id});loopZonesG.appendChild(g);attachLoopZoneEvents(g,zone,loop);}
+    g.innerHTML='';
+    const rect=svgEl('rect',{x:zone.x,y:zone.y,width:zone.w,height:zone.h,rx:8,
+      fill:zone.fill||'rgba(58,143,255,0.08)',
+      stroke:zone.border||'rgba(58,143,255,0.35)',
+      'stroke-width':1,'stroke-dasharray':'6 4'});
+    g.appendChild(rect);
+    if(zone.label){
+      g.appendChild(svgTxt(zone.label,{x:zone.x+12,y:zone.y+20,'font-family':"'DM Sans',sans-serif",'font-size':13,'font-weight':'500',fill:zone.border||'rgba(58,143,255,0.8)',opacity:0.85,'pointer-events':'none'}));
+    }
+    const hx=zone.x+zone.w-6,hy=zone.y+zone.h-6;
+    const handle=svgEl('rect',{x:hx,y:hy,width:12,height:12,rx:2,fill:zone.border||'rgba(58,143,255,0.5)',class:'zone-handle',cursor:'nwse-resize'});
+    g.appendChild(handle);
+    handle.addEventListener('mousedown',e=>{e.stopPropagation();const sp=loopSvgPt(e.clientX,e.clientY);loopZoneResizeState={zone,loop,sp,ow:zone.w,oh:zone.h};});
+  });
+}
+
+function attachLoopZoneEvents(g,zone,loop){
+  g.addEventListener('mousedown',e=>{
+    if(loopTool!=='select') return;
+    if(e.target.classList.contains('zone-handle')) return;
+    e.stopPropagation(); if(e.button!==0) return;
+    const sp=loopSvgPt(e.clientX,e.clientY);
+    loopZoneDragState={zone,loop,sp,ox:zone.x,oy:zone.y};
+  });
+  g.addEventListener('dblclick',e=>{
+    e.stopPropagation();
+    openLoopZoneModal(zone,loop);
+  });
+  g.addEventListener('contextmenu',e=>{
+    e.preventDefault();
+    showCtxMenu(e.clientX,e.clientY,[
+      {label:'Delete Zone',danger:true,action:()=>{loop.zones=loop.zones.filter(z=>z.id!==zone.id);renderLoopGraph();persistSave();}},
+    ]);
+  });
+}
+
+function openLoopZoneModal(zone,loop){
+  // Reuse the main zone modal
+  document.getElementById('zone-label-input').value=zone.label||'';
+  buildZoneColorPicker('zone-color-row',zone.fill||ZONE_PRESETS[0].fill,zone.border||ZONE_PRESETS[0].border);
+  modalZone._loopZone=zone;
+  modalZone._loopZoneLoop=loop;
+  modalZone.hidden=false;
+  setTimeout(()=>document.getElementById('zone-label-input').focus(),50);
+}
+function startLoopZoneDraw(pt,loop){
+  loop.zones=loop.zones||[];
+  const z={id:uid(),x:pt.x,y:pt.y,w:0,h:0,label:'',fill:ZONE_PRESETS[Math.floor(Math.random()*ZONE_PRESETS.length)].fill,border:ZONE_PRESETS[Math.floor(Math.random()*ZONE_PRESETS.length)].border};
+  // Use consistent preset
+  const p=ZONE_PRESETS[loop.zones.length%ZONE_PRESETS.length];
+  z.fill=p.fill;z.border=p.border;
+  loop.zones.push(z);
+  loopZoneDraw={zone:z,sx:pt.x,sy:pt.y,loop};
+  renderLoopGraph();
+}
 
 function loopSvgPt(cx,cy){
   const r=loopSvg.getBoundingClientRect();
@@ -1421,33 +1585,75 @@ function loopSvgPt(cx,cy){
 }
 function applyLoopTransform(){
   const t=`translate(${loopView.pan.x},${loopView.pan.y}) scale(${loopView.zoom})`;
+  loopZonesG.setAttribute('transform',t);
   loopNodesG.setAttribute('transform',t);
   loopEdgesG.setAttribute('transform',t);
   loopZoomLabel.textContent=`${Math.round(loopView.zoom*100)}%`;
 }
 function setLoopTool(t){
   loopTool=t;
-  ['loop-btn-fn','loop-btn-cond','loop-btn-connect'].forEach(id=>{
+  ['loop-btn-select','loop-btn-fn','loop-btn-cond','loop-btn-zone','loop-btn-loop','loop-btn-connect'].forEach(id=>{
     document.getElementById(id)?.classList.remove('active');
   });
-  if(t==='fn') document.getElementById('loop-btn-fn')?.classList.add('active');
-  if(t==='cond') document.getElementById('loop-btn-cond')?.classList.add('active');
+  if(t==='select')  document.getElementById('loop-btn-select')?.classList.add('active');
+  if(t==='fn')      document.getElementById('loop-btn-fn')?.classList.add('active');
+  if(t==='cond')    document.getElementById('loop-btn-cond')?.classList.add('active');
+  if(t==='zone')    document.getElementById('loop-btn-zone')?.classList.add('active');
+  if(t==='loop')    document.getElementById('loop-btn-loop')?.classList.add('active');
   if(t==='connect') document.getElementById('loop-btn-connect')?.classList.add('active');
-  loopCanvasWrap.style.cursor=t==='connect'?'crosshair':'default';
+  loopCanvasWrap.style.cursor=(t==='connect'||t==='zone'||t==='loop')?'crosshair':'default';
 }
 
-function getActiveLoop(){return state.loops.find(l=>l.id===_activeLoopId);}
+function getActiveLoop(){
+  if(_loopStack.length) return _loopStack[_loopStack.length-1];
+  return state.loops.find(l=>l.id===_activeLoopId);
+}
 
-function openLoopModal(id){
-  _activeLoopId=id;
+function renderLoopBreadcrumb(){
+  if(!loopBreadcrumb) return;
+  loopBreadcrumb.innerHTML='';
+  // "Main" entry
+  const main=document.createElement('span');
+  main.className='loop-breadcrumb-item';
+  main.textContent='Main';
+  main.addEventListener('click',()=>{_loopStack=[];closeLoopModal();});
+  loopBreadcrumb.appendChild(main);
+  _loopStack.forEach((loop,i)=>{
+    const sep=document.createElement('span');
+    sep.className='loop-breadcrumb-sep';
+    sep.textContent=' → ';
+    loopBreadcrumb.appendChild(sep);
+    const item=document.createElement('span');
+    const isCurrent=i===_loopStack.length-1;
+    item.className='loop-breadcrumb-item'+(isCurrent?' current':'');
+    item.textContent=loop.label||'loop';
+    if(!isCurrent){
+      item.addEventListener('click',()=>{
+        // Navigate up to this level
+        _loopStack=_loopStack.slice(0,i+1);
+        renderLoopCanvas();
+      });
+    }
+    loopBreadcrumb.appendChild(item);
+  });
+}
+
+function renderLoopCanvas(){
   const loop=getActiveLoop(); if(!loop) return;
   loop.nodes=loop.nodes||[];
   loop.edges=loop.edges||[];
   document.getElementById('loop-modal-name').textContent=loop.label||'loop';
-  loopModal.hidden=false;
   loopSelectedNodes.clear(); loopSelectedEdge=null;
   loopView.zoom=1; loopView.pan.x=0; loopView.pan.y=0;
   setLoopTool('select');
+  loopZonesG.innerHTML='';loopNodesG.innerHTML='';loopEdgesG.innerHTML='';
+  loopDragEdgeEl.setAttribute('opacity','0');
+  loopEdgesG.appendChild(loopDragEdgeEl);
+  if(loopInfoPanel) loopInfoPanel.classList.add('info-panel--hidden');
+  renderLoopBreadcrumb();
+  // Update close button label
+  const closeBtn=document.getElementById('loop-btn-close');
+  if(closeBtn) closeBtn.textContent=_loopStack.length>1?'↩ Back':'← Close Loop';
   requestAnimationFrame(()=>{
     requestAnimationFrame(()=>{
       applyLoopTransform();
@@ -1457,32 +1663,155 @@ function openLoopModal(id){
   });
 }
 
+function openLoopModal(id){
+  // Find loop in state.loops (top-level loops)
+  const loop=state.loops.find(l=>l.id===id);
+  if(!loop) return;
+  _activeLoopId=id;
+  _loopStack=[loop];
+  loopModal.hidden=false;
+  renderLoopCanvas();
+}
+
+function openSubLoopModal(sub){
+  // Push sub-loop onto stack without adding to state.loops
+  _loopStack.push(sub);
+  renderLoopCanvas();
+}
+
 function closeLoopModal(){
   loopModal.hidden=true;
   _activeLoopId=null;
+  _loopStack=[];
+  loopZonesG.innerHTML='';
   loopNodesG.innerHTML='';
   loopEdgesG.innerHTML='';
   loopDragEdgeEl.setAttribute('opacity','0');
-  // re-append drag edge
   loopEdgesG.appendChild(loopDragEdgeEl);
+  loopSubLoopDragState=null;loopSubLoopResizeState=null;
+  loopInfoPanel.classList.add('info-panel--hidden');
   persistSave();
   render();
 }
-document.getElementById('loop-btn-close').addEventListener('click',closeLoopModal);
+document.getElementById('loop-btn-close').addEventListener('click',()=>{
+  if(_loopStack.length>1){
+    _loopStack.pop();
+    renderLoopCanvas();
+  } else {
+    closeLoopModal();
+  }
+});
 
 /* Rename from inside modal */
 document.getElementById('loop-btn-rename').addEventListener('click',()=>{
   const loop=getActiveLoop(); if(!loop) return;
   const name=prompt('Loop name:',loop.label||'loop');
-  if(name!=null){loop.label=name.trim()||'loop';document.getElementById('loop-modal-name').textContent=loop.label;persistSave();}
+  if(name!=null){loop.label=name.trim()||'loop';document.getElementById('loop-modal-name').textContent=loop.label;renderLoopBreadcrumb();persistSave();}
 });
 
 /* ── Loop graph render ── */
+function createSubLoop(pt,parentLoop){
+  const label=prompt('Loop name:','loop');
+  if(label===null) return;
+  const condId=uid();
+  const sub={
+    id:uid(),x:pt.x,y:pt.y,w:200,h:160,label:label.trim()||'loop',
+    nodes:[{id:condId,type:'cond',x:100,y:80,name:'loop condition',
+             params:[],returnType:'',returnExample:'',
+             branches:['continue','break'],color:'#3d3519',notes:'',sizeOverride:null}],
+    edges:[],zones:[],subLoops:[],
+    loopCondId:condId,
+  };
+  parentLoop.subLoops=parentLoop.subLoops||[];
+  parentLoop.subLoops.push(sub);
+  renderLoopGraph();persistSave();
+}
+
+function renderLoopSubLoops(loop){
+  loop.subLoops=loop.subLoops||[];
+  // Remove stale sub-loop elements
+  [...loopNodesG.querySelectorAll('[data-slid]')].forEach(el=>{
+    if(!loop.subLoops.find(s=>s.id===el.dataset.slid)) el.remove();
+  });
+  loop.subLoops.forEach(sub=>{
+    let g=loopNodesG.querySelector(`[data-slid="${sub.id}"]`);
+    if(!g){
+      g=svgEl('g',{'data-slid':sub.id,'class':'loop-box-group'});
+      loopNodesG.appendChild(g);
+      attachSubLoopEvents(g,sub,loop);
+    }
+    g.innerHTML='';
+    const W=sub.w||200,H=sub.h||160,HEADER=22,PAD=6;
+    // Outer glow
+    g.appendChild(svgEl('rect',{x:sub.x-2,y:sub.y-2,width:W+4,height:H+4,rx:9,
+      fill:'none',stroke:'rgba(255,200,80,0.1)','stroke-width':4,'pointer-events':'none'}));
+    // Body
+    g.appendChild(svgEl('rect',{x:sub.x,y:sub.y,width:W,height:H,rx:7,
+      fill:'rgba(14,16,22,0.88)',stroke:'rgba(255,200,80,0.45)','stroke-width':1.5,'stroke-dasharray':'6 3'}));
+    // Header
+    g.appendChild(svgEl('rect',{x:sub.x,y:sub.y,width:W,height:HEADER,rx:7,
+      fill:'rgba(255,200,80,0.08)','pointer-events':'none'}));
+    g.appendChild(svgEl('rect',{x:sub.x,y:sub.y+HEADER-6,width:W,height:6,
+      fill:'rgba(255,200,80,0.08)','pointer-events':'none'}));
+    const icon=svgEl('text',{x:sub.x+8,y:sub.y+HEADER-4,'font-size':12,'font-family':'sans-serif',fill:'#ffc850','pointer-events':'none',opacity:0.9});
+    icon.textContent='↺';g.appendChild(icon);
+    g.appendChild(svgTxt(trunc(sub.label||'loop',Math.floor((W-36)/6)),{
+      x:sub.x+22,y:sub.y+HEADER-4,
+      'font-family':"'Martian Mono',monospace",'font-size':9,'font-weight':'600',
+      fill:'#ffc850','pointer-events':'none',opacity:0.9}));
+    // Resize handle
+    const hx=sub.x+W-6,hy=sub.y+H-6;
+    const handle=svgEl('rect',{x:hx,y:hy,width:10,height:10,rx:2,
+      fill:'rgba(255,200,80,0.5)',class:'zone-handle',cursor:'nwse-resize'});
+    g.appendChild(handle);
+    handle.addEventListener('mousedown',e=>{
+      e.stopPropagation();
+      const sp=loopSvgPt(e.clientX,e.clientY);
+      loopSubLoopResizeState={sub,loop,sp,ow:sub.w,oh:sub.h};
+    });
+  });
+}
+
+let loopSubLoopDragState=null, loopSubLoopResizeState=null;
+
+function attachSubLoopEvents(g,sub,loop){
+  g.addEventListener('mousedown',e=>{
+    if(loopTool!=='select') return;
+    if(e.target.classList.contains('zone-handle')) return;
+    e.stopPropagation(); if(e.button!==0) return;
+    const sp=loopSvgPt(e.clientX,e.clientY);
+    loopSubLoopDragState={sub,loop,sp,ox:sub.x,oy:sub.y};
+  });
+  g.addEventListener('dblclick',e=>{
+    e.stopPropagation();
+    openSubLoopModal(sub);
+  });
+  g.addEventListener('contextmenu',e=>{
+    e.preventDefault();
+    showCtxMenu(e.clientX,e.clientY,[
+      {label:'Open Loop',action:()=>{
+        openSubLoopModal(sub);
+      }},
+      {label:'Rename',action:()=>{
+        const name=prompt('Loop name:',sub.label||'loop');
+        if(name!=null){sub.label=name.trim()||'loop';renderLoopGraph();persistSave();}
+      }},
+      {sep:true},
+      {label:'Delete Loop',danger:true,action:()=>{
+        loop.subLoops=loop.subLoops.filter(s=>s.id!==sub.id);
+        state.loops=state.loops.filter(l=>l.id!==sub.id);
+        renderLoopGraph();persistSave();
+      }},
+    ]);
+  });
+}
+
 function renderLoopGraph(){
   const loop=getActiveLoop(); if(!loop) return;
+  renderLoopZones(loop);
+  renderLoopSubLoops(loop);
   renderLoopEdges(loop);
   renderLoopNodes(loop);
-  // Update mini-preview on main canvas (deferred to avoid recursion)
   requestAnimationFrame(()=>renderLoops());
 }
 
@@ -1536,8 +1865,8 @@ function renderLoopEdges(loop){
     const fp=nodeBorderPoint(fn,tn.x,tn.y),tp=nodeBorderPoint(tn,fn.x,fn.y);
     const d=edge.type==='return'?straight(fp.x,fp.y,tp.x,tp.y):curved(fp.x,fp.y,tp.x,tp.y);
     const col=edgeStrokeColor(edge),resolvedCol=resolveColor(col);
-    const markerId=`arrowhead-${resolvedCol.replace(/[#().,\s]/g,'')}`;
-    ensureMarker(markerId,resolvedCol);
+    const markerId=`loop-arrowhead-${resolvedCol.replace(/[#().,\s]/g,'')}`;
+    loopEnsureMarker(markerId,resolvedCol);
     g.appendChild(svgEl('path',{d,fill:'none',stroke:'transparent','stroke-width':16,'class':'edge-hit'}));
     const path=svgEl('path',{d,'class':`edge type-${edge.type}`,'marker-end':`url(#${markerId})`});
     path.style.stroke=col;
@@ -1556,13 +1885,28 @@ function renderLoopEdges(loop){
 function attachLoopNodeEvents(g,node,loop){
   g.addEventListener('mousedown',e=>{
     if(loopTool==='connect') return;
+    if(loopTool!=='select') return; // only drag in select mode
     e.stopPropagation(); if(e.button!==0) return;
     if(!loopSelectedNodes.has(node.id)){loopSelectedNodes.clear();loopSelectedNodes.add(node.id);loopSelectedEdge=null;}
     const sp=loopSvgPt(e.clientX,e.clientY);
     const starts={};
     loopSelectedNodes.forEach(id=>{const n=(loop.nodes||[]).find(nn=>nn.id===id);if(n) starts[id]={x:n.x,y:n.y};});
     loopDragNodeState={sp,starts,moved:false,nodeId:node.id,loop};
+    document.body.style.userSelect='none';
     renderLoopNodes(loop);
+  });
+  g.addEventListener('mouseup',e=>{
+    if(e.button!==0) return;
+    if(loopDragNodeState&&loopDragNodeState.nodeId===node.id&&!loopDragNodeState.moved){
+      showInfoPanel(node.id,loop);
+    }
+  });
+  g.addEventListener('click',e=>{
+    if(loopTool==='select'&&!loopDragNodeState?.moved){
+      e.stopPropagation();
+      if(!loopSelectedNodes.has(node.id)){loopSelectedNodes.clear();loopSelectedNodes.add(node.id);}
+      renderLoopNodes(loop);
+    }
   });
   g.addEventListener('dblclick',e=>{e.stopPropagation();openLoopNodeModal(node.id,loop);});
   g.addEventListener('contextmenu',e=>{
@@ -1595,6 +1939,8 @@ function attachLoopEdgeEvents(g,edge,loop){
   g.addEventListener('contextmenu',e=>{
     e.preventDefault();
     showCtxMenu(e.clientX,e.clientY,[
+      {label:'Edit Edge',action:()=>openLoopEdgeModal(edge.id,loop)},
+      {sep:true},
       {label:'Delete Edge',danger:true,action:()=>{
         loop.edges=(loop.edges||[]).filter(ee=>ee.id!==edge.id);
         loopSelectedEdge=null;renderLoopGraph();persistSave();
@@ -1747,13 +2093,68 @@ loopCanvasWrap.addEventListener('mousedown',e=>{
     openLoopNodeModal(node.id,loop,true);
     setLoopTool('select');
   }
+  if(loopTool==='loop'){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    createSubLoop(pt,loop);
+    setLoopTool('select');
+  }
+  if(loopTool==='zone'){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    startLoopZoneDraw(pt,loop);
+  }
+  if(loopTool==='select'){
+    // Deselect when clicking canvas background
+    const tgt=e.target;
+    if(tgt.tagName==='rect'&&tgt.getAttribute('fill')==='url(#loop-grid-pat)'||tgt.tagName==='svg'){
+      loopSelectedNodes.clear();loopSelectedEdge=null;
+      renderLoopGraph();
+    }
+  }
 });
 
 document.addEventListener('mousemove',e=>{
+  if(loopModal.hidden) return; // only handle when loop modal is open
   if(loopPanning&&!loopModal.hidden){
     loopView.pan.x=e.clientX-loopPanStart.x;
     loopView.pan.y=e.clientY-loopPanStart.y;
     applyLoopTransform();
+    return;
+  }
+  if(loopZoneDragState){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    loopZoneDragState.zone.x=loopZoneDragState.ox+(pt.x-loopZoneDragState.sp.x);
+    loopZoneDragState.zone.y=loopZoneDragState.oy+(pt.y-loopZoneDragState.sp.y);
+    renderLoopZones(loopZoneDragState.loop);
+    return;
+  }
+  if(loopZoneResizeState){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    loopZoneResizeState.zone.w=Math.max(60,loopZoneResizeState.ow+(pt.x-loopZoneResizeState.sp.x));
+    loopZoneResizeState.zone.h=Math.max(40,loopZoneResizeState.oh+(pt.y-loopZoneResizeState.sp.y));
+    renderLoopZones(loopZoneResizeState.loop);
+    return;
+  }
+  if(loopSubLoopDragState){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    loopSubLoopDragState.sub.x=loopSubLoopDragState.ox+(pt.x-loopSubLoopDragState.sp.x);
+    loopSubLoopDragState.sub.y=loopSubLoopDragState.oy+(pt.y-loopSubLoopDragState.sp.y);
+    renderLoopSubLoops(loopSubLoopDragState.loop);
+    return;
+  }
+  if(loopSubLoopResizeState){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    loopSubLoopResizeState.sub.w=Math.max(100,loopSubLoopResizeState.ow+(pt.x-loopSubLoopResizeState.sp.x));
+    loopSubLoopResizeState.sub.h=Math.max(80,loopSubLoopResizeState.oh+(pt.y-loopSubLoopResizeState.sp.y));
+    renderLoopSubLoops(loopSubLoopResizeState.loop);
+    return;
+  }
+  if(loopZoneDraw){
+    const pt=loopSvgPt(e.clientX,e.clientY);
+    loopZoneDraw.zone.x=Math.min(pt.x,loopZoneDraw.sx);
+    loopZoneDraw.zone.y=Math.min(pt.y,loopZoneDraw.sy);
+    loopZoneDraw.zone.w=Math.abs(pt.x-loopZoneDraw.sx);
+    loopZoneDraw.zone.h=Math.abs(pt.y-loopZoneDraw.sy);
+    renderLoopZones(loopZoneDraw.loop);
     return;
   }
   if(loopDragNodeState){
@@ -1766,8 +2167,10 @@ document.addEventListener('mousemove',e=>{
         const n=(loop.nodes||[]).find(nn=>nn.id===id);
         if(n&&loopDragNodeState.starts[id]){n.x=loopDragNodeState.starts[id].x+dx;n.y=loopDragNodeState.starts[id].y+dy;}
       });
-      renderLoopGraph();
+      renderLoopEdges(loop);
+      renderLoopNodes(loop);
     }
+    return;
   }
   if(loopEdgeDrag&&!loopModal.hidden){
     const pt=loopSvgPt(e.clientX,e.clientY);
@@ -1777,7 +2180,17 @@ document.addEventListener('mousemove',e=>{
 
 document.addEventListener('mouseup',e=>{
   if(loopPanning){loopPanning=false;}
-  if(loopDragNodeState){if(loopDragNodeState.moved) persistSave(); loopDragNodeState=null;}
+  if(loopZoneDragState){persistSave();loopZoneDragState=null;}
+  if(loopZoneResizeState){persistSave();loopZoneResizeState=null;}
+  if(loopSubLoopDragState){persistSave();loopSubLoopDragState=null;}
+  if(loopSubLoopResizeState){persistSave();loopSubLoopResizeState=null;}
+  if(loopZoneDraw){
+    const z=loopZoneDraw.zone,loop=loopZoneDraw.loop;
+    if(z.w<20||z.h<20){loop.zones=loop.zones.filter(zz=>zz.id!==z.id);renderLoopGraph();}
+    else{renderLoopGraph();persistSave();openLoopZoneModal(z,loop);}
+    loopZoneDraw=null;setLoopTool('select');
+  }
+  if(loopDragNodeState){if(loopDragNodeState.moved) persistSave(); loopDragNodeState=null;document.body.style.userSelect='';}
   if(loopEdgeDrag&&!loopModal.hidden){
     const loop=getActiveLoop();
     if(loop){
@@ -1808,6 +2221,7 @@ function startLoopEdgeDrag(fromNode,px,py){
 }
 
 /* ── Loop zoom ── */
+loopCanvasWrap.addEventListener('click',()=>{removeCtxMenu();});
 loopCanvasWrap.addEventListener('wheel',e=>{
   e.preventDefault();
   const r=loopSvg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
@@ -1819,8 +2233,11 @@ loopCanvasWrap.addEventListener('wheel',e=>{
 document.getElementById('loop-btn-zoom-in').addEventListener('click',()=>{loopView.zoom=Math.min(3,loopView.zoom*1.2);applyLoopTransform();});
 document.getElementById('loop-btn-zoom-out').addEventListener('click',()=>{loopView.zoom=Math.max(0.15,loopView.zoom*0.8);applyLoopTransform();});
 document.getElementById('loop-btn-fit').addEventListener('click',loopFitAll);
+document.getElementById('loop-btn-select').addEventListener('click',()=>setLoopTool('select'));
 document.getElementById('loop-btn-fn').addEventListener('click',()=>setLoopTool('fn'));
 document.getElementById('loop-btn-cond').addEventListener('click',()=>setLoopTool('cond'));
+document.getElementById('loop-btn-zone').addEventListener('click',()=>setLoopTool('zone'));
+document.getElementById('loop-btn-loop').addEventListener('click',()=>setLoopTool('loop'));
 document.getElementById('loop-btn-connect').addEventListener('click',()=>setLoopTool('connect'));
 
 function loopFitAll(){
@@ -1844,6 +2261,8 @@ document.addEventListener('keydown',e=>{
   if(k==='c') setLoopTool('cond');
   if(k==='e') setLoopTool('connect');
   if(k==='v') setLoopTool('select');
+  if(k==='z') setLoopTool('zone');
+  if(k==='l') setLoopTool('loop');
   if(k==='escape'){closeLoopModal();}
   if(k==='delete'||k==='backspace'){
     const loop=getActiveLoop(); if(!loop) return;
