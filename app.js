@@ -1335,6 +1335,7 @@ function renameLoop(id){
         loopDragState.loop.x=loopDragState.ox+dx;
         loopDragState.loop.y=loopDragState.oy+dy;
         renderLoops();
+        renderEdges();
       }
     }
     if(loopResizeState){
