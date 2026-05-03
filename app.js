@@ -1759,6 +1759,61 @@ function renderLoopSubLoops(loop){
       x:sub.x+22,y:sub.y+HEADER-4,
       'font-family':"'Martian Mono',monospace",'font-size':9,'font-weight':'600',
       fill:'#ffc850','pointer-events':'none',opacity:0.9}));
+
+    // ── Mini-preview of inner nodes ──
+    const previewX=sub.x+PAD, previewY=sub.y+HEADER+PAD;
+    const previewW=W-PAD*2, previewH=H-HEADER-PAD*2;
+    const subNodes=sub.nodes||[], subEdges=sub.edges||[];
+    // Clip path for sub-loop preview (use loopSvg defs)
+    const clipId=`lsclip-${sub.id}`;
+    const loopDefs=loopSvg.querySelector('defs');
+    let clipEl=loopDefs.querySelector(`#${clipId}`);
+    if(!clipEl){clipEl=svgEl('clipPath',{id:clipId});loopDefs.appendChild(clipEl);}
+    clipEl.innerHTML='';
+    clipEl.appendChild(svgEl('rect',{x:previewX,y:previewY,width:previewW,height:previewH,rx:4}));
+    const previewG=svgEl('g',{'clip-path':`url(#${clipId})`,'pointer-events':'none'});
+    g.appendChild(previewG);
+    previewG.appendChild(svgEl('rect',{x:previewX,y:previewY,width:previewW,height:previewH,rx:4,fill:'rgba(255,200,80,0.025)'}));
+    if(subNodes.length===0){
+      previewG.appendChild(svgTxt('empty — dblclick to enter',{
+        x:previewX+previewW/2,y:previewY+previewH/2,
+        'text-anchor':'middle','dominant-baseline':'middle',
+        'font-family':"'DM Sans',sans-serif",'font-size':8,fill:'rgba(255,200,80,0.3)'}));
+    } else {
+      let mnX=Infinity,mnY=Infinity,mxX=-Infinity,mxY=-Infinity;
+      subNodes.forEach(n=>{const r=nodeRadius(n)+4;mnX=Math.min(mnX,n.x-r);mnY=Math.min(mnY,n.y-r);mxX=Math.max(mxX,n.x+r);mxY=Math.max(mxY,n.y+r);});
+      const pad=10;
+      const scX=(previewW-pad*2)/(mxX-mnX||1),scY=(previewH-pad*2)/(mxY-mnY||1);
+      const sc=Math.min(scX,scY,1);
+      const ox=previewX+pad+((previewW-pad*2)-(mxX-mnX)*sc)/2;
+      const oy=previewY+pad+((previewH-pad*2)-(mxY-mnY)*sc)/2;
+      const mp=(x,y)=>({x:ox+(x-mnX)*sc,y:oy+(y-mnY)*sc});
+      subEdges.forEach(edge=>{
+        const fn=subNodes.find(n=>n.id===edge.from),tn=subNodes.find(n=>n.id===edge.to);
+        if(!fn||!tn) return;
+        const fp=mp(fn.x,fn.y),tp=mp(tn.x,tn.y);
+        const ec=edge.color||{call:'rgba(77,232,178,0.5)',return:'rgba(255,143,77,0.5)',param:'rgba(124,111,247,0.5)',cond:'rgba(247,217,111,0.5)'}[edge.type]||'rgba(77,232,178,0.5)';
+        previewG.appendChild(svgEl('path',{d:`M${fp.x},${fp.y} L${tp.x},${tp.y}`,fill:'none',stroke:ec,'stroke-width':1.2,opacity:0.7}));
+      });
+      subNodes.forEach(n=>{
+        const r=Math.max(4,nodeRadius(n)*sc),p=mp(n.x,n.y);
+        const col=getNodeColor(n),isLC=n.id===sub.loopCondId;
+        if(n.type==='fn'){
+          previewG.appendChild(svgEl('circle',{cx:p.x,cy:p.y,r:r+1,fill:'rgba(0,0,0,0.3)'}));
+          previewG.appendChild(svgEl('circle',{cx:p.x,cy:p.y,r,fill:col.fill,stroke:isLC?'#ffc850':col.border,'stroke-width':isLC?1.5:1}));
+          if(r>10) previewG.appendChild(svgTxt(trunc(n.name||'fn',Math.floor(r/3.5)),{x:p.x,y:p.y,'text-anchor':'middle','dominant-baseline':'middle','font-family':"'DM Sans',sans-serif",'font-size':Math.max(6,Math.min(9,r*0.55)),fill:'rgba(255,255,255,0.75)'}));
+        } else {
+          const pts=`${p.x},${p.y-r} ${p.x+r},${p.y} ${p.x},${p.y+r} ${p.x-r},${p.y}`;
+          previewG.appendChild(svgEl('polygon',{points:`${p.x},${p.y-r-1} ${p.x+r+1},${p.y} ${p.x},${p.y+r+1} ${p.x-r-1},${p.y}`,fill:'rgba(0,0,0,0.3)'}));
+          previewG.appendChild(svgEl('polygon',{points:pts,fill:col.fill,stroke:isLC?'#ffc850':col.border,'stroke-width':isLC?1.5:1}));
+          if(r>10) previewG.appendChild(svgTxt(trunc(n.name||'cond',Math.floor(r/3.5)),{x:p.x,y:p.y,'text-anchor':'middle','dominant-baseline':'middle','font-family':"'DM Sans',sans-serif",'font-size':Math.max(6,Math.min(9,r*0.5)),fill:'rgba(255,255,255,0.75)'}));
+        }
+        if(isLC) previewG.appendChild(svgEl('circle',{cx:p.x+r*0.7,cy:p.y-r*0.7,r:Math.max(2,r*0.28),fill:'#ffc850',opacity:0.9}));
+      });
+    }
+    // Preview border
+    g.appendChild(svgEl('rect',{x:previewX,y:previewY,width:previewW,height:previewH,rx:4,fill:'none',stroke:'rgba(255,200,80,0.2)','stroke-width':0.8,'pointer-events':'none'}));
+
     // Resize handle
     const hx=sub.x+W-6,hy=sub.y+H-6;
     const handle=svgEl('rect',{x:hx,y:hy,width:10,height:10,rx:2,
@@ -1853,16 +1908,35 @@ function drawLoopPorts(g,node){
 function renderLoopEdges(loop){
   const edges=loop.edges||[];
   const nodes=loop.nodes||[];
+  const subLoops=loop.subLoops||[];
   const existing=new Set([...loopEdgesG.querySelectorAll('[data-leid]')].map(e=>e.dataset.leid));
   const current=new Set(edges.map(e=>e.id));
   existing.forEach(id=>{if(!current.has(id)) loopEdgesG.querySelector(`[data-leid="${id}"]`)?.remove();});
   edges.forEach(edge=>{
-    const fn=nodes.find(n=>n.id===edge.from),tn=nodes.find(n=>n.id===edge.to);
+    const fn=nodes.find(n=>n.id===edge.from);
+    let tn=nodes.find(n=>n.id===edge.to);
+    let subTarget=null;
+    if(!tn){
+      // Check if target is a sub-loop box
+      subTarget=subLoops.find(s=>s.id===edge.to);
+      if(subTarget){
+        const W=subTarget.w||200,H=subTarget.h||160;
+        tn={id:subTarget.id,type:'fn',x:subTarget.x+W/2,y:subTarget.y+H/2,sizeOverride:0};
+      }
+    }
     if(!fn||!tn) return;
     let g=loopEdgesG.querySelector(`[data-leid="${edge.id}"]`);
     if(!g){g=svgEl('g',{'data-leid':edge.id});loopEdgesG.appendChild(g);attachLoopEdgeEvents(g,edge,loop);}
     g.innerHTML='';
-    const fp=nodeBorderPoint(fn,tn.x,tn.y),tp=nodeBorderPoint(tn,fn.x,fn.y);
+    let fp,tp;
+    if(subTarget){
+      fp=nodeBorderPoint(fn,tn.x,tn.y);
+      const W=subTarget.w||200,H=subTarget.h||160;
+      tp=rectBorderPoint(subTarget.x,subTarget.y,W,H,fn.x,fn.y);
+    } else {
+      fp=nodeBorderPoint(fn,tn.x,tn.y);
+      tp=nodeBorderPoint(tn,fn.x,fn.y);
+    }
     const d=edge.type==='return'?straight(fp.x,fp.y,tp.x,tp.y):curved(fp.x,fp.y,tp.x,tp.y);
     const col=edgeStrokeColor(edge),resolvedCol=resolveColor(col);
     const markerId=`loop-arrowhead-${resolvedCol.replace(/[#().,\s]/g,'')}`;
@@ -2195,6 +2269,7 @@ document.addEventListener('mouseup',e=>{
     const loop=getActiveLoop();
     if(loop){
       const pt=loopSvgPt(e.clientX,e.clientY);
+      // Check regular nodes first
       const target=(loop.nodes||[]).find(n=>{
         if(n.id===loopEdgeDrag.fromNode.id) return false;
         const dx=n.x-pt.x,dy=n.y-pt.y;
@@ -2207,6 +2282,19 @@ document.addEventListener('mouseup',e=>{
         loop.edges.push(edge);
         renderLoopGraph();persistSave();
         openLoopEdgeModal(edge.id,loop);
+      } else {
+        // Check sub-loops as targets
+        const subTarget=(loop.subLoops||[]).find(s=>{
+          const W=s.w||200,H=s.h||160;
+          return pt.x>=s.x&&pt.x<=s.x+W&&pt.y>=s.y&&pt.y<=s.y+H;
+        });
+        if(subTarget){
+          const edge={id:uid(),from:loopEdgeDrag.fromNode.id,to:subTarget.id,type:'call',dtype:'',example:'',label:'',color:''};
+          loop.edges=loop.edges||[];
+          loop.edges.push(edge);
+          renderLoopGraph();persistSave();
+          openLoopEdgeModal(edge.id,loop);
+        }
       }
     }
     loopDragEdgeEl.setAttribute('opacity','0');loopEdgeDrag=null;
