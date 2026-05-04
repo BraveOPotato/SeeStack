@@ -2214,6 +2214,7 @@ document.addEventListener('mousemove',e=>{
     loopSubLoopDragState.sub.x=loopSubLoopDragState.ox+(pt.x-loopSubLoopDragState.sp.x);
     loopSubLoopDragState.sub.y=loopSubLoopDragState.oy+(pt.y-loopSubLoopDragState.sp.y);
     renderLoopSubLoops(loopSubLoopDragState.loop);
+    renderLoopEdges(loopSubLoopDragState.loop);
     return;
   }
   if(loopSubLoopResizeState){
@@ -2221,6 +2222,7 @@ document.addEventListener('mousemove',e=>{
     loopSubLoopResizeState.sub.w=Math.max(100,loopSubLoopResizeState.ow+(pt.x-loopSubLoopResizeState.sp.x));
     loopSubLoopResizeState.sub.h=Math.max(80,loopSubLoopResizeState.oh+(pt.y-loopSubLoopResizeState.sp.y));
     renderLoopSubLoops(loopSubLoopResizeState.loop);
+    renderLoopEdges(loopSubLoopResizeState.loop);
     return;
   }
   if(loopZoneDraw){
