@@ -167,28 +167,39 @@ function computeFocusSet(nodeId){
   const litNodes=new Set([nodeId]);
   const litEdges=new Set();
 
-  // Walk downstream: light edges+nodes; recurse through cond, stop at fn.
+  // Walk downstream: light edges+nodes; recurse through cond, stop at fn or loop.
   function walkDown(fromId,visited=new Set()){
     if(visited.has(fromId)) return; visited.add(fromId);
     state.edges.filter(e=>e.from===fromId).forEach(e=>{
-      const t=state.nodes.find(n=>n.id===e.to); if(!t) return;
+      const t=state.nodes.find(n=>n.id===e.to)||state.loops.find(l=>l.id===e.to);
+      if(!t) return;
       litEdges.add(e.id); litNodes.add(t.id);
       if(t.type==='cond') walkDown(t.id,visited);
+      // loops and fn nodes are terminal — no further recursion
     });
   }
 
-  // Walk upstream: light edges+nodes; recurse through cond, stop at fn.
+  // Walk upstream: light edges+nodes; recurse through cond, stop at fn or loop.
   function walkUp(fromId,visited=new Set()){
     if(visited.has(fromId)) return; visited.add(fromId);
     state.edges.filter(e=>e.to===fromId).forEach(e=>{
-      const s=state.nodes.find(n=>n.id===e.from); if(!s) return;
+      const s=state.nodes.find(n=>n.id===e.from)||state.loops.find(l=>l.id===e.from);
+      if(!s) return;
       litEdges.add(e.id); litNodes.add(s.id);
       if(s.type==='cond') walkUp(s.id,visited);
+      // loops and fn nodes are terminal — no further recursion
     });
   }
 
   const node=state.nodes.find(n=>n.id===nodeId);
-  if(!node) return{litNodes,litEdges};
+  if(!node){
+    // Check if it's a loop/subloop id — walk upstream only, stop at fn
+    const isLoop=state.loops.find(l=>l.id===nodeId);
+    if(isLoop){
+      walkUp(nodeId);
+    }
+    return{litNodes,litEdges};
+  }
   walkDown(nodeId);
   walkUp(nodeId);
   return{litNodes,litEdges};
@@ -752,7 +763,7 @@ document.addEventListener('mouseup',e=>{
   if(selBoxStart){selBoxStart=null;removeSelBox();}
 });
 
-canvasWrap.addEventListener('click',()=>{removeCtxMenu();});
+canvasWrap.addEventListener('click',e=>{removeCtxMenu();if(state.focusNodeId&&(e.target===svg||e.target.id==='bg-grid'||e.target===canvasWrap)){state.focusNodeId=null;render();}});
 
 /* ── Zoom ── */
 canvasWrap.addEventListener('wheel',e=>{
@@ -1101,6 +1112,7 @@ function renderLoops(){
   [...zonesGroup.querySelectorAll('[data-lid]')].forEach(el=>{
     if(!state.loops.find(l=>l.id===el.dataset.lid)) el.remove();
   });
+  const focus=state.focusNodeId?computeFocusSet(state.focusNodeId):null;
   state.loops.forEach(loop=>{
     let g=zonesGroup.querySelector(`[data-lid="${loop.id}"]`);
     if(!g){
@@ -1274,6 +1286,8 @@ function renderLoops(){
       fill:'rgba(255,200,80,0.5)','class':'zone-handle',cursor:'nwse-resize'});
     g.appendChild(handle);
     handle.addEventListener('mousedown',e=>{e.stopPropagation();startLoopResize(e,loop);});
+    // Focus dim
+    g.style.opacity=(focus&&!focus.litNodes.has(loop.id))?'0.15':'';
   });
 }
 
@@ -1298,7 +1312,11 @@ function attachLoopBoxEvents(g,loop){
   g.addEventListener('click',e=>{
     e.stopPropagation();
     if(loopDragState&&loopDragState._moved) return;
-    openLoopModal(loop.id);
+    // Set focus highlight (upstream until fn node)
+    state.focusNodeId=loop.id;
+    infoPanel.classList.add('info-panel--hidden');
+    _infoPanelNodeId=null;
+    render();
   });
   g.addEventListener('dblclick',e=>{e.stopPropagation();openLoopModal(loop.id);});
   g.addEventListener('contextmenu',e=>{
